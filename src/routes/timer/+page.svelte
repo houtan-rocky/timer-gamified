@@ -79,7 +79,7 @@
     // Ensure we use currently selected duration, and request auto-start
     const params = new URLSearchParams({
       duration: String(selectedSeconds),
-      autostart: "1",
+      autostart: "0",
     });
     if (!isTauri) {
       const url = `${location.origin}/overlay?${params.toString()}`;
@@ -104,6 +104,8 @@
       alwaysOnTop: true,
       focus: true,
       visible: true,
+      x: 0,
+      y: 0,
     });
     try {
       await new Promise<void>((resolve, reject) => {
