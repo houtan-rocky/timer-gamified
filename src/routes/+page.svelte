@@ -13,6 +13,32 @@
   let editHours = $state(0);
   let editMinutes = $state(2);
   let editSeconds = $state(0);
+  let settingsOpen = $state(false);
+
+  // Auto-messages & zones
+  let autoMessagesEnabled = $state(true);
+  // Thresholds: OK (>= criticalPercent), then CRITICAL (>= dangerPercent), then DANGER (closest to end)
+  let criticalPercent = $state(50); // between criticalPercent and dangerPercent ⇒ CRITICAL
+  let dangerPercent = $state(20);   // <= dangerPercent ⇒ DANGER
+  type UserMessage = { percent: number; text: string; fired?: boolean };
+  let userMessages = $state<UserMessage[]>([
+    { percent: 50, text: "Halfway there!" }
+  ]);
+  let prevZone: 'OK' | 'DANGER' | 'CRITICAL' | null = null;
+  // Sound settings
+  let dangerSound: 'heartbeat' | 'beep' | 'none' = $state('heartbeat');
+  let criticalSound: 'heartbeat' | 'beep' | 'none' = $state('none');
+  let audioCtx: AudioContext | null = null;
+  let dangerSoundTimer: number | null = null;
+  // Colors
+  let dangerColor = $state('#ff4444');
+  let criticalColor = $state('#ffa500');
+  // Sync
+  let startAtMs: number | null = null;
+  let runDurationSeconds = $state(selectedSeconds);
+  let lastStartSig: number | null = null;
+  let bc: BroadcastChannel | null = null;
+  let suppressBroadcast = false;
 
   function formatTime(totalSeconds: number) {
     const m = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
@@ -23,19 +49,28 @@
   function setPreset(seconds: number) {
     selectedSeconds = seconds;
     reset();
+    broadcast({ type: 'preset', duration: selectedSeconds });
   }
 
   function start() {
     if (isRunning) return;
     isRunning = true;
     if (remainingSeconds <= 0) remainingSeconds = selectedSeconds;
+    runDurationSeconds = selectedSeconds;
+    startAtMs = Date.now() - (runDurationSeconds - remainingSeconds) * 1000;
+    lastStartSig = startAtMs;
+    if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
     intervalId = window.setInterval(() => {
-      if (remainingSeconds > 0) {
-        remainingSeconds -= 1;
-      } else {
-        stop();
+      if (!startAtMs) return;
+      const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+      const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
+      if (nextRemaining !== remainingSeconds) {
+        remainingSeconds = nextRemaining;
+        handleTick();
       }
+      if (remainingSeconds === 0) stop();
     }, 1000);
+    if (!suppressBroadcast) broadcast({ type: 'start', duration: runDurationSeconds, startAtMs, critical: criticalPercent, danger: dangerPercent, snd: dangerSound, csnd: criticalSound, colors: { dangerColor, criticalColor }, messages: userMessages.map(({ percent, text }) => ({ percent, text })) });
   }
 
   function stop() {
@@ -44,11 +79,17 @@
       clearInterval(intervalId);
       intervalId = null;
     }
+    startAtMs = null;
+    if (!suppressBroadcast) broadcast({ type: 'pause', remaining: remainingSeconds, duration: selectedSeconds });
   }
 
   function reset() {
     stop();
     remainingSeconds = selectedSeconds;
+    prevZone = null;
+    userMessages = userMessages.map(m => ({ ...m, fired: false }));
+    startAtMs = null;
+    if (!suppressBroadcast) broadcast({ type: 'reset', duration: selectedSeconds });
   }
 
   function openEdit(index: number) {
@@ -92,9 +133,18 @@
 
   async function openOverlayAndStart() {
     const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
+    const startedAt = isRunning ? (Date.now() - (selectedSeconds - remainingSeconds) * 1000) : Date.now();
     const params = new URLSearchParams({
       duration: String(selectedSeconds),
       autostart: "1",
+      critical: String(criticalPercent),
+      danger: String(dangerPercent),
+      msgs: encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(userMessages.map(({ percent, text }) => ({ percent, text }))))))),
+      snd: dangerSound,
+      csnd: criticalSound,
+      startAt: String(Math.floor(startedAt)),
+      dangerColor,
+      criticalColor
     });
     if (!isTauri) {
       // Web fallback: open Picture-in-Picture mini overlay
@@ -256,6 +306,179 @@
 
     return pipWindow;
   }
+
+  function currentPercent() {
+    return Math.max(0, Math.round((remainingSeconds / Math.max(1, selectedSeconds)) * 100));
+  }
+
+  function zoneFromPercent(p: number): 'OK' | 'CRITICAL' | 'DANGER' {
+    if (p <= dangerPercent) return 'DANGER';
+    if (p <= criticalPercent) return 'CRITICAL';
+    return 'OK';
+  }
+
+  function requestNotifyPermission() {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }
+
+  function notifyDesktop(title: string, body: string) {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+    } catch {}
+    // Tauri fallback via plugin-notification
+    const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
+    if (isTauri) {
+      (async () => {
+        try {
+          const notif = await import("@tauri-apps/plugin-notification");
+          const granted = await notif.isPermissionGranted();
+          if (!granted) await notif.requestPermission();
+          await notif.sendNotification({ title, body });
+        } catch {}
+      })();
+    }
+  }
+
+  function handleTick() {
+    if (!autoMessagesEnabled) return;
+    const pct = currentPercent();
+    const zone = zoneFromPercent(pct);
+    if (zone !== prevZone) {
+      prevZone = zone;
+      if (zone === 'DANGER' || zone === 'CRITICAL') notifyDesktop('Timer', `Entered ${zone} zone`);
+      if (zone === 'DANGER') { startDangerSound(); stopCriticalSound(); }
+      else if (zone === 'CRITICAL') { stopDangerSound(); startCriticalSound(); }
+      else { stopDangerSound(); stopCriticalSound(); }
+    }
+    for (const m of userMessages) {
+      if (!m.fired && pct <= m.percent) {
+        m.fired = true;
+        notifyDesktop('Timer message', m.text);
+      }
+    }
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)(); } catch {}
+    }
+  }
+
+  function playBeep(durationMs = 200, frequency = 880) {
+    ensureAudio(); if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine'; osc.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + durationMs/1000);
+    osc.stop(audioCtx.currentTime + durationMs/1000 + 0.02);
+  }
+
+  function playHeartbeat() {
+    ensureAudio(); if (!audioCtx) return;
+    // two short low-frequency beats
+    playBeep(80, 150); setTimeout(() => playBeep(80, 150), 180);
+  }
+
+  function startDangerSound() {
+    stopDangerSound();
+    if (dangerSound === 'none') return;
+    if (dangerSound === 'beep') {
+      dangerSoundTimer = window.setInterval(() => playBeep(150, 880), 1200);
+    } else {
+      dangerSoundTimer = window.setInterval(() => playHeartbeat(), 1000);
+    }
+  }
+
+  function stopDangerSound() {
+    if (dangerSoundTimer !== null) { clearInterval(dangerSoundTimer); dangerSoundTimer = null; }
+  }
+
+  let criticalSoundTimer: number | null = null;
+  function startCriticalSound() {
+    stopCriticalSound();
+    if (criticalSound === 'none') return;
+    if (criticalSound === 'beep') criticalSoundTimer = window.setInterval(() => playBeep(120, 1200), 1500);
+    else criticalSoundTimer = window.setInterval(() => playHeartbeat(), 900);
+  }
+  function stopCriticalSound() {
+    if (criticalSoundTimer !== null) { clearInterval(criticalSoundTimer); criticalSoundTimer = null; }
+  }
+
+  function broadcast(msg: any) {
+    if (!bc && typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      bc = new BroadcastChannel('timer-sync');
+    }
+    try {
+      bc?.postMessage({ source: 'main', ...msg });
+    } catch {}
+  }
+
+  if (typeof window !== 'undefined') {
+    if ('BroadcastChannel' in window) {
+      if (!bc) bc = new BroadcastChannel('timer-sync');
+      bc.onmessage = (e) => {
+        const data = e.data || {};
+        if (data.source === 'main') return; // ignore our own rebroadcasts
+        if (data.source === 'overlay') {
+          // apply state from overlay without re-broadcasting
+          suppressBroadcast = true;
+        }
+        if (data.type === 'request_state') {
+          broadcast({
+            type: 'state',
+            duration: selectedSeconds,
+            remaining: remainingSeconds,
+            isRunning,
+            startAtMs,
+            critical: criticalPercent,
+            danger: dangerPercent,
+            snd: dangerSound,
+            csnd: criticalSound,
+            colors: { dangerColor, criticalColor },
+            messages: userMessages.map(({ percent, text }) => ({ percent, text }))
+          });
+        } else if (data.type === 'start') {
+          const incomingStart = data.startAtMs ?? Date.now();
+          if (lastStartSig && Math.abs(incomingStart - lastStartSig) < 150) { suppressBroadcast = false; return; }
+          selectedSeconds = data.duration ?? selectedSeconds;
+          runDurationSeconds = data.duration ?? selectedSeconds;
+          startAtMs = incomingStart;
+          lastStartSig = startAtMs;
+          isRunning = true;
+          // restart interval loop to compute remaining from startAtMs
+          if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+          intervalId = window.setInterval(() => {
+            if (!startAtMs) return;
+            const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+            const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
+            if (nextRemaining !== remainingSeconds) {
+              remainingSeconds = nextRemaining; handleTick();
+            }
+            if (remainingSeconds === 0) stop();
+          }, 1000);
+        } else if (data.type === 'pause') {
+          if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+          isRunning = false;
+          startAtMs = null;
+          if (typeof data.remaining === 'number') remainingSeconds = data.remaining;
+        } else if (data.type === 'reset') {
+          selectedSeconds = data.duration ?? selectedSeconds;
+          remainingSeconds = selectedSeconds;
+          prevZone = null; userMessages = userMessages.map(m => ({ ...m, fired: false }));
+          startAtMs = null; isRunning = false;
+        } else if (data.type === 'preset') {
+          selectedSeconds = data.duration ?? selectedSeconds;
+          remainingSeconds = selectedSeconds;
+        }
+        suppressBroadcast = false;
+      };
+    }
+  }
 </script>
 
 <main class="wrap">
@@ -290,12 +513,14 @@
 
   <div class="controls">
     {#if !isRunning}
-      <Button variant="primary" onclick={start}>▶ Start</Button>
+      <button class="action primary" onclick={start}>▶ Start</button>
     {:else}
-      <Button variant="secondary" onclick={stop}>Pause</Button>
+      <button class="action secondary" onclick={stop}>Pause</button>
     {/if}
-    <Button variant="ghost" onclick={reset}>Reset</Button>
+    <button class="action ghost" onclick={reset}>Reset</button>
     <Button variant="ghost" onclick={openOverlayAndStart} title="Always-on-top widget">View mode</Button>
+    <button class="icon gear" title="Settings" onclick={() => { requestNotifyPermission(); editOpen=false; settingsOpen=true; }} aria-label="Settings">⚙</button>
+    <button class="icon chat {autoMessagesEnabled ? 'on' : ''}" title="Auto messages" onclick={() => { autoMessagesEnabled=!autoMessagesEnabled; requestNotifyPermission(); }} aria-label="Auto messages">💬</button>
   </div>
 
   <Modal open={editOpen} title="Edit time" subtitle="Adjust hours, minutes and seconds" onclose={closeEdit}>
@@ -335,6 +560,80 @@
       {/if}
     </div>
   </Modal>
+
+  {#if settingsOpen}
+    <Modal open={settingsOpen} title="Timer settings" subtitle="Configure zones and messages" onclose={() => settingsOpen=false}>
+      <div class="grid">
+        <label class="row">
+          <span class="muted" style="width:180px">Critical threshold (%)</span>
+          <input type="range" min="1" max="99" bind:value={criticalPercent} />
+          <span>{criticalPercent}%</span>
+        </label>
+        <label class="row">
+          <span class="muted" style="width:180px">Danger threshold (%)</span>
+          <input type="range" min="1" max="99" bind:value={dangerPercent} />
+          <span>{dangerPercent}%</span>
+        </label>
+        <div class="muted" style="font-size:12px">Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.</div>
+
+        <div style="margin-top:12px; font-weight:600;">Messages (trigger when remaining ≤ %)</div>
+        {#each userMessages as msg, idx}
+          <div class="row">
+            <input type="number" min="1" max="99" bind:value={msg.percent} style="width:80px" />
+            <input type="text" bind:value={msg.text} placeholder="Message to show" style="flex:1" />
+            <button class="icon remove" title="Remove" onclick={() => userMessages = userMessages.filter((_, i) => i !== idx)}>×</button>
+          </div>
+        {/each}
+        <div class="row">
+          <button class="icon" onclick={() => userMessages = [...userMessages, { percent: 30, text: 'Keep going!' }]} title="Add message">＋</button>
+        </div>
+        <div style="margin-top:12px; font-weight:600;">Danger sound</div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="dangerSound" value="heartbeat" checked={dangerSound==='heartbeat'} onclick={() => dangerSound='heartbeat'} /> Heartbeat (default)
+          </label>
+        </div>
+        <div style="margin-top:8px; font-weight:600;">Critical sound</div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="criticalSound" value="none" checked={criticalSound==='none'} onclick={() => criticalSound='none'} /> None (default)
+          </label>
+        </div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="criticalSound" value="heartbeat" checked={criticalSound==='heartbeat'} onclick={() => criticalSound='heartbeat'} /> Heartbeat
+          </label>
+        </div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="criticalSound" value="beep" checked={criticalSound==='beep'} onclick={() => criticalSound='beep'} /> Beep
+          </label>
+        </div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="dangerSound" value="beep" checked={dangerSound==='beep'} onclick={() => dangerSound='beep'} /> Beep
+          </label>
+        </div>
+        <div class="row">
+          <label class="row" style="gap:8px">
+            <input type="radio" name="dangerSound" value="none" checked={dangerSound==='none'} onclick={() => dangerSound='none'} /> None
+          </label>
+        </div>
+      <div style="margin-top:12px; font-weight:600;">Zone colors</div>
+      <div class="row">
+        <span class="muted" style="width:180px">Danger color</span>
+        <input type="color" bind:value={dangerColor} />
+      </div>
+      <div class="row">
+        <span class="muted" style="width:180px">Critical color</span>
+        <input type="color" bind:value={criticalColor} />
+      </div>
+      </div>
+      <div class="row" style="justify-content:flex-end; margin-top: 12px;">
+        <Button variant="ghost" onclick={() => settingsOpen=false}>Close</Button>
+      </div>
+    </Modal>
+  {/if}
 </main>
 
 <style>
@@ -375,6 +674,13 @@
 
 .controls { display: flex; gap: 12px; flex-wrap: wrap; }
 .selects select { background: #0f0f0f; color: var(--text); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px; }
+.icon { background: rgba(0,0,0,0.35); color: var(--text); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.icon.gear {}
+.icon.chat.on { border-color: var(--primary); }
+.action { border-radius: 10px; border: 1px solid var(--card-border); padding: 0.6em 1.0em; font-weight: 600; color: var(--text); background: var(--card); box-shadow: var(--shadow); cursor: pointer; }
+.action.primary { background: var(--primary); color: #05210c; border-color: #72d480; }
+.action.secondary { background: #1b1b1b; }
+.action.ghost { background: transparent; }
 
 @media (prefers-color-scheme: dark) {}
 </style>

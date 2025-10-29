@@ -5,6 +5,22 @@
   let remainingSeconds = $state(initialSeconds);
   let isRunning = $state(false);
   let intervalId: number | null = null;
+  let criticalPercent = $state(50);
+  let dangerPercent = $state(20);
+  let startAtMs: number | null = null;
+  let runDurationSeconds = $state(initialSeconds);
+  let lastStartSig: number | null = null;
+  type UserMessage = { percent: number; text: string; fired?: boolean };
+  let userMessages = $state<UserMessage[]>([]);
+  let prevZone: 'OK' | 'DANGER' | 'CRITICAL' | null = null;
+  let now = $state(new Date());
+  let dangerSound: 'heartbeat' | 'beep' | 'none' = $state('heartbeat');
+  let dangerColor = $state('#ff4444');
+  let criticalColor = $state('#ffa500');
+  let bc: BroadcastChannel | null = null;
+  let suppressBroadcast = false;
+  let audioCtx: AudioContext | null = null;
+  let dangerSoundTimer: number | null = null;
 
   function formatTime(totalSeconds: number) {
     const m = Math.floor(totalSeconds / 60)
@@ -20,13 +36,29 @@
     if (isRunning) return;
     isRunning = true;
     if (remainingSeconds <= 0) remainingSeconds = initialSeconds;
+    runDurationSeconds = initialSeconds;
+    // Recompute start point from current remaining to avoid including paused time
+    startAtMs = Date.now() - (runDurationSeconds - remainingSeconds) * 1000;
+    lastStartSig = startAtMs;
     intervalId = window.setInterval(() => {
+      if (startAtMs) {
+        const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+        remainingSeconds = Math.max(0, runDurationSeconds - elapsed);
+      }
       if (remainingSeconds > 0) {
-        remainingSeconds -= 1;
+        // zone transitions
+        const p = currentPercent();
+        const z = zoneFromPercent(p);
+        if (z !== prevZone) {
+          prevZone = z;
+          notifyDesktop('Timer zone changed', `Entered ${z} zone`);
+          if (z === 'DANGER') startDangerSound(); else stopDangerSound();
+        }
       } else {
         stop();
       }
     }, 1000);
+    if (!suppressBroadcast) { try { bc?.postMessage({ source: 'overlay', type: 'start', duration: initialSeconds, startAtMs }); } catch {} }
   }
 
   function stop() {
@@ -35,12 +67,61 @@
       clearInterval(intervalId);
       intervalId = null;
     }
+    // Clear start anchor to prevent drift while paused
+    startAtMs = null;
+    stopDangerSound();
+    if (!suppressBroadcast) { try { bc?.postMessage({ source: 'overlay', type: 'pause', remaining: remainingSeconds, duration: initialSeconds }); } catch {} }
   }
 
   function reset() {
     stop();
     remainingSeconds = initialSeconds;
+    startAtMs = null;
+    if (!suppressBroadcast) { try { bc?.postMessage({ source: 'overlay', type: 'reset', duration: initialSeconds }); } catch {} }
   }
+
+  function currentPercent() {
+    return Math.max(0, Math.round((remainingSeconds / Math.max(1, initialSeconds)) * 100));
+  }
+
+  function zoneFromPercent(p: number): 'OK' | 'CRITICAL' | 'DANGER' {
+    if (p <= dangerPercent) return 'DANGER';
+    if (p <= criticalPercent) return 'CRITICAL';
+    return 'OK';
+  }
+
+  function notifyDesktop(title: string, body: string) {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+    } catch {}
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)(); } catch {}
+    }
+  }
+
+  function playBeep(durationMs = 200, frequency = 880) {
+    ensureAudio(); if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine'; osc.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + durationMs/1000);
+    osc.stop(audioCtx.currentTime + durationMs/1000 + 0.02);
+  }
+
+  function playHeartbeat() { playBeep(80, 150); setTimeout(() => playBeep(80, 150), 180); }
+  function startDangerSound() {
+    stopDangerSound();
+    if (dangerSound === 'none') return;
+    if (dangerSound === 'beep') dangerSoundTimer = window.setInterval(() => playBeep(150, 880), 1200);
+    else dangerSoundTimer = window.setInterval(() => playHeartbeat(), 1000);
+  }
+  function stopDangerSound() { if (dangerSoundTimer !== null) { clearInterval(dangerSoundTimer); dangerSoundTimer = null; } }
 
   onMount(async () => {
     // Parse query params for duration and autostart
@@ -52,7 +133,30 @@
       remainingSeconds = secs;
     }
     const autostart = url.searchParams.get("autostart");
+    const startAt = url.searchParams.get('startAt');
+    if (startAt) startAtMs = Number(startAt) || null;
     if (autostart === "1") start();
+
+    const crit = url.searchParams.get('critical');
+    const danger = url.searchParams.get('danger');
+    if (crit) criticalPercent = Math.min(99, Math.max(1, Number(crit) || criticalPercent));
+    if (danger) dangerPercent = Math.min(99, Math.max(1, Number(danger) || dangerPercent));
+    const msgsStr = url.searchParams.get('msgs');
+    if (msgsStr) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(atob(decodeURIComponent(msgsStr))));
+        if (Array.isArray(decoded)) userMessages = decoded;
+      } catch {}
+    }
+    const snd = url.searchParams.get('snd');
+    if (snd === 'beep' || snd === 'heartbeat' || snd === 'none') dangerSound = snd;
+    const csnd = url.searchParams.get('csnd');
+    let criticalSound: 'heartbeat' | 'beep' | 'none' = 'none';
+    if (csnd === 'heartbeat' || csnd === 'beep' || csnd === 'none') criticalSound = csnd;
+    const dcol = url.searchParams.get('dangerColor');
+    const ccol = url.searchParams.get('criticalColor');
+    if (dcol) dangerColor = dcol;
+    if (ccol) criticalColor = ccol;
 
     // Ensure always-on-top if Tauri is available
     const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
@@ -80,10 +184,54 @@
         }
       }));
     }
+
+    // Clock updater
+    setInterval(() => { now = new Date(); }, 1000);
+
+    // Sync channel
+    if ('BroadcastChannel' in window) {
+      bc = new BroadcastChannel('timer-sync');
+      bc.onmessage = (e) => {
+        const data = e.data || {};
+        if (data.source === 'overlay') return; // ignore our own
+        if (data.type === 'start') {
+          suppressBroadcast = true;
+          const incomingStart = data.startAtMs ?? Date.now();
+          if (lastStartSig && Math.abs(incomingStart - lastStartSig) < 150) return;
+          initialSeconds = data.duration ?? initialSeconds;
+          runDurationSeconds = data.duration ?? initialSeconds;
+          startAtMs = incomingStart;
+          lastStartSig = startAtMs;
+          criticalPercent = data.critical ?? criticalPercent;
+          dangerPercent = data.danger ?? dangerPercent;
+          if (data.colors) { dangerColor = data.colors.dangerColor ?? dangerColor; criticalColor = data.colors.criticalColor ?? criticalColor; }
+          if (Array.isArray(data.messages)) userMessages = data.messages;
+          start();
+          suppressBroadcast = false;
+        } else if (data.type === 'pause') {
+          suppressBroadcast = true;
+          stop();
+          startAtMs = null;
+          if (typeof data.remaining === 'number') remainingSeconds = data.remaining;
+          suppressBroadcast = false;
+        } else if (data.type === 'reset') {
+          suppressBroadcast = true;
+          initialSeconds = data.duration ?? initialSeconds; reset();
+          suppressBroadcast = false;
+        } else if (data.type === 'preset') {
+          initialSeconds = data.duration ?? initialSeconds; remainingSeconds = initialSeconds;
+        }
+      };
+      try { bc.postMessage({ type: 'request_state' }); } catch {}
+    }
   });
 </script>
 
-<main class="overlay" data-tauri-drag-region>
+<main class="overlay {zoneFromPercent(currentPercent()).toLowerCase()} {remainingSeconds===0 ? 'ended' : ''}" data-tauri-drag-region style={`--danger:${dangerColor}; --critical:${criticalColor}` }>
+  <div class="top">
+    <div class="left">{now.toLocaleDateString()}</div>
+    <div class="right">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+  </div>
   <div class="time">{formatTime(remainingSeconds)}</div>
   <div class="bar">
     <div class="fill" style={`width: ${(1 - Math.max(0, remainingSeconds) / Math.max(1, initialSeconds)) * 100}%`}></div>
@@ -111,13 +259,28 @@
   padding: 8px;
 }
 
+.overlay.ok { background: transparent; }
+.overlay.danger { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.overlay.critical { background: color-mix(in srgb, var(--critical) 12%, transparent); }
+
 .time {
   font-size: 40px;
   letter-spacing: 2px;
+  animation: pulse 2s infinite ease-in-out;
+}
+.overlay.ended .time { animation: none; }
+.overlay.danger .time { animation-duration: 1.25s; color: var(--danger); text-shadow: 0 0 12px color-mix(in srgb, var(--danger) 50%, transparent); }
+.overlay.critical .time { animation-duration: 0.75s; color: var(--critical); text-shadow: 0 0 14px color-mix(in srgb, var(--critical) 55%, transparent); }
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+  100% { transform: scale(1); }
 }
 
 .bar { width: 90%; height: 8px; background: #242424; border-radius: 6px; overflow: hidden; -webkit-app-region: no-drag; }
 .bar .fill { height: 100%; background: #8ef59b; transition: width .2s ease; }
+
+.top { position: absolute; top: 6px; left: 8px; right: 8px; display: flex; justify-content: space-between; font-size: 12px; opacity: 0.9; -webkit-app-region: no-drag; }
 
 .buttons { display: flex; gap: 6px; -webkit-app-region: no-drag; }
 
