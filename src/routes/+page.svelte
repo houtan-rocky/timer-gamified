@@ -1563,7 +1563,6 @@
     border-radius:2px;
     display: grid;
     place-items: center;
-    background: color-mix(in srgb, var(--card-border) 35%, transparent);
   }
   .heatmap-wrap .hm-cell.today { outline: 1px solid var(--primary); outline-offset: 1px; }
 

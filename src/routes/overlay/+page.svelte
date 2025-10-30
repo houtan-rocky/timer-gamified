@@ -32,6 +32,8 @@
   let endQuestionText = $state('Did you achieve your goal?');
   let editingTime = $state(false);
   let editTimeStr = $state('');
+  let editError = $state('');
+  let editInputEl: HTMLInputElement | null = null;
   let overlayAlwaysOnTop = false;
   let forceAlwaysOnTop = $state(false);
   let colorTheme = 'dark';
@@ -173,6 +175,7 @@
   function openTimeEditor() {
     if (isRunning) return;
     editingTime = true;
+    editError = '';
     // E.g. 01:05 or 12:21 or 00:08
     const h = Math.floor(remainingSeconds / 3600);
     const m = Math.floor((remainingSeconds % 3600) / 60);
@@ -180,19 +183,35 @@
     editTimeStr = h ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   }
   function saveTimeEdit() {
-    // Accept hh:mm:ss or mm:ss
+    // Validate against hh:mm:ss or mm:ss
+    const re = /^(\d{1,2}:)?\d{1,2}:\d{2}$/;
+    if (!re.test(editTimeStr.trim())) {
+      editError = 'Use mm:ss or hh:mm:ss';
+      setTimeout(() => editInputEl?.focus(), 0);
+      return;
+    }
     const parts = editTimeStr.trim().split(':').map(Number);
-    let total = 0;
-    if (parts.length === 3) { total = parts[0]*3600 + parts[1]*60 + parts[2]; }
-    else if (parts.length === 2) { total = parts[0]*60 + parts[1]; }
-    else if (parts.length === 1) { total = parts[0]; }
-    total = Math.max(1, total);
+    let h = 0, m = 0, s = 0;
+    if (parts.length === 3) { [h, m, s] = parts; }
+    else { [m, s] = parts; }
+    if (m > 59 || s > 59 || h < 0 || m < 0 || s < 0) {
+      editError = 'Minutes/seconds must be 0-59';
+      setTimeout(() => editInputEl?.focus(), 0);
+      return;
+    }
+    let total = (h * 3600) + (m * 60) + s;
+    if (!Number.isFinite(total) || total < 1) {
+      editError = 'Time must be at least 1s';
+      setTimeout(() => editInputEl?.focus(), 0);
+      return;
+    }
     remainingSeconds = total;
     runDurationSeconds = total;
     initialSeconds = total;
     editingTime = false;
+    editError = '';
   }
-  function cancelTimeEdit() { editingTime = false; }
+  function cancelTimeEdit() { editingTime = false; editError = ''; }
 
   function requestOverlayGoNotOnTop() {
     forceAlwaysOnTop = false;
@@ -441,7 +460,12 @@
   {:else}
     <div class="time" role="button" tabindex="0" onclick={openTimeEditor} onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') openTimeEditor(); }} title="Click to edit time">
       {#if editingTime}
-        <input type="text" class="edit-time-text" bind:value={editTimeStr} autofocus pattern="(\d{1,2}:)?\d{1,2}:\d{2}" onblur={saveTimeEdit} onkeydown={e => { if (e.key === 'Enter') saveTimeEdit(); else if (e.key === 'Escape') cancelTimeEdit(); }} style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;" />
+        <div class="time-edit-wrap">
+          <input type="text" class="edit-time-text" bind:value={editTimeStr} bind:this={editInputEl} autofocus pattern="(\d{1,2}:)?\d{1,2}:\d{2}" onblur={saveTimeEdit} onkeydown={e => { if (e.key === 'Enter') saveTimeEdit(); else if (e.key === 'Escape') cancelTimeEdit(); }} style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;" />
+          {#if editError}
+            <div class="edit-error">{editError}</div>
+          {/if}
+        </div>
       {:else}
         {formatTime(remainingSeconds)}
       {/if}
@@ -456,7 +480,7 @@
     {#if isRunning || hasEnded}
       <button onclick={() => { reset(); start(); }}>Restart</button>
     {/if}
-    <button onclick={reset}>Reset</button>
+    <!-- <button onclick={reset}>Reset</button> -->
   </div>
 </main>
 
@@ -495,7 +519,10 @@
   animation: pulse 2s infinite ease-in-out;
   font-family: 'Play', 'Inter', ui-sans-serif, system-ui, sans-serif;
   text-align: center;
+  width: 100%;
 }
+.time-edit-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.edit-error { font-size: 11px; color: #ff5a5a; }
 .overlay.ended .time { animation: none; }
 .overlay.danger .time { animation-duration: 1.25s; color: var(--danger); text-shadow: 0 0 12px color-mix(in srgb, var(--danger) 50%, transparent); }
 .overlay.critical .time { animation-duration: 0.75s; color: var(--critical); text-shadow: 0 0 14px color-mix(in srgb, var(--critical) 55%, transparent); }
@@ -607,6 +634,10 @@ button:active { background-color: #e8e8e8; }
 }
 .edit-time-ui button:hover { background: #467; color: #fff; }
 .time[title] { cursor: pointer; }
+.theme-light .overlay.ok .time {
+  color: #17191b !important;
+  text-shadow: none !important;
+}
 </style>
 
 
