@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { LogicalPosition } from "@tauri-apps/api/dpi";
+  import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 
   let initialSeconds = $state(60);
   let remainingSeconds = $state(initialSeconds);
@@ -393,6 +393,16 @@
     // Do NOT persist locally here to avoid duplicates. Only notify main.
     try { bc?.postMessage({ source: 'overlay', type: 'result', ts: Date.now(), result: win ? 'win' : 'loss' }); } catch {}
     hasEnded = true;
+    const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
+    if (isTauri) {
+      (async () => {
+        try {
+          const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+          const current = getCurrentWebviewWindow();
+          await current.setSize(new LogicalSize(260, 140));
+        } catch {}
+      })();
+    }
   }
 </script>
 

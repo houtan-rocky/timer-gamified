@@ -162,12 +162,12 @@
   }
   function colorFor(w: number, l: number) {
     const total = w + l;
+    if (total === 0) return '#1f1f1f';
     // Detect theme: direct body class if present
     let isLight = false;
     if (typeof document !== 'undefined') {
       isLight = document.body.classList.contains('theme-light');
     }
-    if (total === 0) return isLight ? '#e6eee1' : '#1f1f1f';
     const ratio = w / total; // 1 => all wins, 0 => all losses
     const green = Math.round(100 + 155 * ratio);
     const red = Math.round(100 + 155 * (1 - ratio));

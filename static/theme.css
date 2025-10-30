@@ -265,6 +265,8 @@ body {
 .theme-light .heatmap-wrap .heatmap-grid {
   background: var(--card);
 }
+/* Do not override heatmap cell inline backgrounds in light mode */
+.theme-light .heatmap-wrap .hm-cell { background: unset !important; filter: none; box-shadow: none; }
 .theme-light .heatmap-wrap .hm-cell:not([style*="background"]) {
   background: #e6eee1 !important;
 }
