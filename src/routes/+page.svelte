@@ -71,6 +71,12 @@
         if (typeof v.askOnEnd === 'boolean') askOnEnd = v.askOnEnd;
         if (typeof v.endQuestionText === 'string') endQuestionText = v.endQuestionText;
       }
+      const z = localStorage.getItem('zoneSoundSettings');
+      if (z) {
+        const v = JSON.parse(z);
+        if (['none','danger','critical','all'].includes(v.zoneSoundMode)) zoneSoundMode = v.zoneSoundMode;
+        if (['none','danger','critical','all'].includes(v.zoneNotifyMode)) zoneNotifyMode = v.zoneNotifyMode;
+      }
     } catch {}
   }
   function saveStats() {
@@ -78,6 +84,11 @@
   }
   function persistEndQuestionSettings() {
     try { localStorage.setItem('endQuestionSettings', JSON.stringify({ askOnEnd, endQuestionText })); } catch {}
+  }
+  function persistZoneSoundSettings() {
+    try {
+      localStorage.setItem('zoneSoundSettings', JSON.stringify({zoneSoundMode, zoneNotifyMode}));
+    } catch {}
   }
 
   // Heatmap helpers (inside script)
@@ -166,16 +177,13 @@
   }
 
   function answerEnd(win: boolean) {
-    if (endRecorded) return; // Already answered, prevent duplicate
-    endRecorded = true;
-    showEndQuestion = false;
-    const now = Date.now();
     const recs = loadRecords();
-    recs.push({ ts: now, result: win ? 'win' : 'loss' });
+    recs.push({ ts: Date.now(), result: win ? 'win' : 'loss' });
     saveRecords(recs);
     recomputeToday();
+    showEndQuestion = false;
     // Let overlay hide its question too
-    try { broadcast({ type: 'result', ts: now, result: win ? 'win' : 'loss' }); } catch {}
+    try { broadcast({ type: 'result', ts: Date.now(), result: win ? 'win' : 'loss' }); } catch {}
   }
 
   async function setTaskbarProgress(progress?: number) {
@@ -208,6 +216,15 @@
   let lastStartSig: number | null = null;
   let bc: BroadcastChannel | null = null;
   let suppressBroadcast = false;
+  let allMuted = $state(false); // global mute toggle
+  let zoneSoundMode: 'none' | 'danger' | 'critical' | 'all' = $state('none'); // Default OFF
+  let zoneNotifyMode: 'none' | 'danger' | 'critical' | 'all' = $state('none');
+  let zoneNotifFired = new Set<string>(); // tracks zone notifications for this run
+  let messageFireTimestamps: Record<number, number> = {};
+
+  function resetZoneNotifFired() {
+    zoneNotifFired = new Set<string>();
+  }
 
   function formatTime(totalSeconds: number) {
     const m = Math.floor(totalSeconds / 60)
@@ -299,6 +316,8 @@
     hasFiredEndSound = false;
     endRecorded = false;
     setTaskbarProgress(undefined);
+    resetZoneNotifFired();
+    messageFireTimestamps = {};
     if (!suppressBroadcast)
       broadcast({ type: "reset", duration: selectedSeconds });
   }
@@ -396,7 +415,9 @@
       dangerColor,
       criticalColor,
       ask: askOnEnd ? '1' : '0',
-      q: encodeURIComponent(endQuestionText)
+      q: encodeURIComponent(endQuestionText),
+      alwaysOnTop: overlayAlwaysOnTop ? '1' : '0',
+      popupOnEnd: overlayPopupOnEnd ? '1' : '0',
     });
     if (!isTauri) {
       location.href = `/overlay?${params.toString()}`;
@@ -419,7 +440,7 @@
       height: 140,
       resizable: false,
       decorations: false,
-      alwaysOnTop: true,
+      alwaysOnTop: overlayAlwaysOnTop,
       focus: true,
       visible: true,
       shadow: true,
@@ -595,6 +616,7 @@
   }
 
   function notifyDesktop(title: string, body: string) {
+    if (allMuted) return;
     try {
       if (
         typeof Notification !== "undefined" &&
@@ -649,21 +671,35 @@
     const zone = zoneFromPercent(pct);
     if (zone !== prevZone) {
       prevZone = zone;
-      if (zone === "DANGER" || zone === "CRITICAL")
-        notifyDesktop("Timer", `Entered ${zone} zone`);
-      if (zone === "DANGER") {
-        startDangerSound();
-        stopCriticalSound();
-      } else if (zone === "CRITICAL") {
-        stopDangerSound();
-        startCriticalSound();
+      if (zone === 'DANGER' || zone === 'CRITICAL') {
+        // Notification
+        const notifyMap = {'DANGER': ['danger','all'], 'CRITICAL': ['critical','all']};
+        if (zoneNotifyMode && notifyMap[zone]?.includes(zoneNotifyMode) && !zoneNotifFired.has(zone)) {
+          notifyDesktop('Timer', `Entered ${zone} zone`);
+          zoneNotifFired.add(zone);
+        }
+        // Sound
+        const soundMap = {'DANGER': ['danger','all'], 'CRITICAL': ['critical','all']};
+        if (zoneSoundMode && soundMap[zone]?.includes(zoneSoundMode)) {
+          if (zone === 'DANGER') { startDangerSound(); stopCriticalSound(); }
+          else if (zone === 'CRITICAL') { startCriticalSound(); stopDangerSound(); }
+        } else {
+          stopDangerSound();
+          stopCriticalSound();
+        }
       } else {
+        // OK zone, turn off both
         stopDangerSound();
         stopCriticalSound();
       }
     }
-    for (const m of userMessages) {
+    const now = Date.now();
+    for (let i = 0; i < userMessages.length; ++i) {
+      const m = userMessages[i];
       if (!m.fired && pct <= m.percent) {
+        // Cooldown: do not fire if fired in last 2s
+        if (messageFireTimestamps[i] && now - messageFireTimestamps[i] < 2000) continue;
+        messageFireTimestamps[i] = now;
         m.fired = true;
         notifyDesktop("Timer message", m.text);
         playMessageSound(m.sound, m.custom);
@@ -681,6 +717,7 @@
   }
 
   function playBeep(durationMs = 200, frequency = 880) {
+    if (allMuted) return; // Respect mute
     ensureAudio();
     if (!audioCtx) return;
     const osc = audioCtx.createOscillator();
@@ -698,9 +735,9 @@
   }
 
   function playHeartbeat() {
+    if (allMuted) return;
     ensureAudio();
     if (!audioCtx) return;
-    // two short low-frequency beats
     playBeep(80, 150);
     setTimeout(() => playBeep(80, 150), 180);
   }
@@ -734,6 +771,7 @@
 
   function startDangerSound() {
     stopDangerSound();
+    if (zoneSoundMode !== 'danger' && zoneSoundMode !== 'all') return; // disables in other modes
     if (dangerSound === "none") return;
     if (dangerSound === "beep") {
       dangerSoundTimer = window.setInterval(() => playBeep(150, 880), 1200);
@@ -752,6 +790,7 @@
   let criticalSoundTimer: number | null = null;
   function startCriticalSound() {
     stopCriticalSound();
+    if (zoneSoundMode !== 'critical' && zoneSoundMode !== 'all') return; // disables in other modes
     if (criticalSound === "none") return;
     if (criticalSound === "beep")
       criticalSoundTimer = window.setInterval(() => playBeep(120, 1200), 1500);
@@ -772,6 +811,115 @@
       bc?.postMessage({ source: "main", ...msg });
     } catch {}
   }
+
+  let overlayAlwaysOnTop = $state(true); // user option for overlay always-on-top
+  let overlayPopupOnEnd = $state(false); // user option for popup on timer end
+  function persistOverlaySettings() {
+    try {
+      localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd }));
+      if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop});
+    } catch {}
+  }
+  function loadOverlaySettings() {
+    try {
+      const s = localStorage.getItem('overlaySettings');
+      if (s) {
+        const v = JSON.parse(s);
+        if (typeof v.overlayAlwaysOnTop === 'boolean') overlayAlwaysOnTop = v.overlayAlwaysOnTop;
+        if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
+      }
+    } catch {}
+  }
+  loadOverlaySettings();
+
+  function saveAppSettings() {
+    try {
+      const state = {
+        dangerSound,
+        criticalSound,
+        endSound,
+        endSoundCustom,
+        autoMessagesEnabled,
+        criticalPercent,
+        dangerPercent,
+        userMessages,
+        askOnEnd,
+        endQuestionText,
+        presets,
+        dangerColor,
+        criticalColor,
+        zoneSoundMode,
+        zoneNotifyMode,
+        overlayAlwaysOnTop,
+        overlayPopupOnEnd,
+      };
+      localStorage.setItem('appSettings', JSON.stringify(state));
+    } catch {}
+  }
+  function loadAppSettings() {
+    try {
+      const s = localStorage.getItem('appSettings');
+      if (s) {
+        const v = JSON.parse(s);
+        if (typeof v.dangerSound === 'string') dangerSound = v.dangerSound;
+        if (typeof v.criticalSound === 'string') criticalSound = v.criticalSound;
+        if (typeof v.endSound === 'string') endSound = v.endSound;
+        if (typeof v.endSoundCustom === 'string') endSoundCustom = v.endSoundCustom;
+        if (typeof v.autoMessagesEnabled === 'boolean') autoMessagesEnabled = v.autoMessagesEnabled;
+        if (typeof v.criticalPercent === 'number') criticalPercent = v.criticalPercent;
+        if (typeof v.dangerPercent === 'number') dangerPercent = v.dangerPercent;
+        if (Array.isArray(v.userMessages)) userMessages = v.userMessages;
+        if (typeof v.askOnEnd === 'boolean') askOnEnd = v.askOnEnd;
+        if (typeof v.endQuestionText === 'string') endQuestionText = v.endQuestionText;
+        if (Array.isArray(v.presets)) presets = v.presets;
+        if (typeof v.dangerColor === 'string') dangerColor = v.dangerColor;
+        if (typeof v.criticalColor === 'string') criticalColor = v.criticalColor;
+        if (typeof v.zoneSoundMode === 'string') zoneSoundMode = v.zoneSoundMode;
+        if (typeof v.zoneNotifyMode === 'string') zoneNotifyMode = v.zoneNotifyMode;
+        if (typeof v.overlayAlwaysOnTop === 'boolean') overlayAlwaysOnTop = v.overlayAlwaysOnTop;
+        if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
+      }
+    } catch { }
+  }
+  // Call loadAppSettings() immediately on startup
+  loadAppSettings();
+  // For each setting user may change, call saveAppSettings() (e.g. after each setting is toggled/input)
+  // effect(() => { saveAppSettings(dangerSound); }); // Removed
+  // effect(() => { saveAppSettings(criticalSound); }); // Removed
+  // effect(() => { saveAppSettings(endSound); }); // Removed
+  // effect(() => { saveAppSettings(endSoundCustom); }); // Removed
+  // effect(() => { saveAppSettings(autoMessagesEnabled); }); // Removed
+  // effect(() => { saveAppSettings(criticalPercent); }); // Removed
+  // effect(() => { saveAppSettings(dangerPercent); }); // Removed
+  // effect(() => { saveAppSettings(userMessages); }); // Removed
+  // effect(() => { saveAppSettings(askOnEnd); }); // Removed
+  // effect(() => { saveAppSettings(endQuestionText); }); // Removed
+  // effect(() => { saveAppSettings(presets); }); // Removed
+  // effect(() => { saveAppSettings(dangerColor); }); // Removed
+  // effect(() => { saveAppSettings(criticalColor); }); // Removed
+  // effect(() => { saveAppSettings(zoneSoundMode); }); // Removed
+  // effect(() => { saveAppSettings(zoneNotifyMode); }); // Removed
+  // effect(() => { saveAppSettings(overlayAlwaysOnTop); }); // Removed
+  // effect(() => { saveAppSettings(overlayPopupOnEnd); }); // Removed
+
+  // Fix for buildMonthLabels to display each month only at the real transition week
+  function buildMonthLabels(weeks: Array<Array<{ date: Date; key: string; wins: number; losses: number }>>): Array<{text:string, col:number}> {
+    const labels = [];
+    for (let i = 0; i < weeks.length; ++i) {
+      const week = weeks[i];
+      // Only print a label if this week contains the 1st (first day) of the month
+      if (week.find(d => d.date.getDate() === 1)) {
+        labels.push({text: week.find(d => d.date.getDate() === 1)!.date.toLocaleString(undefined, {month: 'short'}), col: i+2});
+      }
+      // Also print on very first week in the grid
+      if (i === 0 && week[0]) {
+        labels.push({text: week[0].date.toLocaleString(undefined, {month: 'short'}), col: i+2});
+      }
+    }
+    // Remove duplicates based on month name and column position
+    return labels.filter((v, idx, arr) => arr.findIndex(l => l.text === v.text && l.col === v.col) === idx);
+  }
+  const weekDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   if (typeof window !== "undefined") {
     if ("BroadcastChannel" in window) {
@@ -803,10 +951,28 @@
         } else if (data.type === "close") {
           overlayOpen = false;
         } else if (data.type === 'result') {
-          // Overlay recorded a result; just hide our question if shown, don't record again
-          if (endRecorded) return; // Already handled locally
-          endRecorded = true;
+          // Overlay recorded a result; persist and update today stats
+          const recs = loadRecords();
+          const result = data.result === 'win' ? 'win' : 'loss';
+          const when = typeof data.ts === 'number' ? data.ts : Date.now();
+          recs.push({ ts: when, result });
+          saveRecords(recs);
+          recomputeToday();
           showEndQuestion = false;
+          if (overlayPopupOnEnd) {
+            const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+            if (isTauri) {
+              (async () => {
+                const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                const overlay = await WebviewWindow.getByLabel("overlay");
+                if (overlay) {
+                  await overlay.show();
+                  await overlay.setAlwaysOnTop(true); // force top if option enabled
+                  await overlay.setFocus();
+                }
+              })();
+            }
+          }
         } else if (data.type === "start") {
           const incomingStart = data.startAtMs ?? Date.now();
           if (lastStartSig && Math.abs(incomingStart - lastStartSig) < 150) {
@@ -862,6 +1028,24 @@
         } else if (data.type === "preset") {
           selectedSeconds = data.duration ?? selectedSeconds;
           remainingSeconds = selectedSeconds;
+        } else if (data.type === "overlay_settings") {
+          overlayAlwaysOnTop = data.alwaysOnTop === 'true';
+          persistOverlaySettings();
+        } else if (data.type === "overlay_popup") {
+          if (overlayPopupOnEnd) {
+            const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+            if (isTauri) {
+              (async () => {
+                const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                const overlay = await WebviewWindow.getByLabel("overlay");
+                if (overlay) {
+                  await overlay.show();
+                  await overlay.setAlwaysOnTop(true); // force top if option enabled
+                  await overlay.setFocus();
+                }
+              })();
+            }
+          }
         }
         suppressBroadcast = false;
       };
@@ -950,17 +1134,15 @@
 
   <section class="heatmap-wrap">
     <div class="heatmap-grid">
-      <!-- Month labels (row 1, columns start at 2) -->
-      {#each buildYearWeeks() as wk, i}
-        {#if wk[0] && wk[0].date.getDate() <= 7}
-          <div class="hm-month" style={`grid-column:${i+2};`}>{wk[0].date.toLocaleString(undefined,{ month:'short'})}</div>
-        {/if}
+      <!-- Month labels on first row, at visually correct columns -->
+      {#each buildMonthLabels(buildYearWeeks()) as ml}
+        <div class="hm-month" style={`grid-column:${ml.col};`}>{ml.text}</div>
       {/each}
-      <!-- Weekday labels (Mon, Wed, Fri at rows 3,5,7) -->
-      <div class="hm-wlabel" style="grid-row:3;">Mon</div>
-      <div class="hm-wlabel" style="grid-row:5;">Wed</div>
-      <div class="hm-wlabel" style="grid-row:7;">Fri</div>
-      <!-- Cells (rows 2..8, columns 2..n) -->
+      <!-- Weekday labels (just once left, accurately aligned for rows 2..8) -->
+      {#each weekDays as w, j}
+        <div class="hm-wlabel" style={`grid-row:${j+2};`}>{w}</div>
+      {/each}
+      <!-- Cells as before -->
       {#each buildYearWeeks() as wk, i}
         {#each wk as day, j}
           <div class={`hm-cell ${day.key === sameDayKey(new Date()) ? 'today' : ''}`} style={`grid-column:${i+2}; grid-row:${j+2}; background:${colorFor(day.wins, day.losses)};`}
@@ -1002,6 +1184,12 @@
         requestNotifyPermission();
       }}
       aria-label="Auto messages">💬</button>
+    <button
+      class="icon tooltip"
+      data-tip={allMuted ? "Unmute all notifications" : "Mute all notifications"}
+      aria-label="Toggle mute"
+      onclick={() => (allMuted = !allMuted)}
+      >{allMuted ? '🔕' : '🔔'}</button>
   </div>
 
   <Modal
@@ -1057,12 +1245,12 @@
       <div class="grid">
         <label class="row">
           <span class="muted" style="width:180px">Critical threshold (%)</span>
-          <input type="range" min="1" max="99" bind:value={criticalPercent} />
+          <input type="range" min="0" max="99" bind:value={criticalPercent} onchange={_ => saveAppSettings()} />
           <span>{criticalPercent}%</span>
         </label>
         <label class="row">
           <span class="muted" style="width:180px">Danger threshold (%)</span>
-          <input type="range" min="1" max="99" bind:value={dangerPercent} />
+          <input type="range" min="0" max="99" bind:value={dangerPercent} onchange={_ => saveAppSettings()} />
           <span>{dangerPercent}%</span>
         </label>
         <div class="muted" style="font-size:12px">
@@ -1119,23 +1307,41 @@
 
         <div style="margin-top:12px; font-weight:600;">End question</div>
         <label class="row" style="gap:8px">
-          <input type="checkbox" bind:checked={askOnEnd} onchange={persistEndQuestionSettings} />
+          <input type="checkbox" bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} />
           <span class="muted">Ask when timer ends</span>
         </label>
         <label class="row">
           <span class="muted" style="width:180px">Question text</span>
-          <input type="text" bind:value={endQuestionText} onblur={persistEndQuestionSettings} style="flex:1" />
+          <input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} style="flex:1" />
         </label>
 
         <div style="margin-top:12px; font-weight:600;">Zone colors</div>
         <div class="row">
           <span class="muted" style="width:180px">Danger color</span>
-          <input type="color" bind:value={dangerColor} />
+          <input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
         </div>
         <div class="row">
           <span class="muted" style="width:180px">Critical color</span>
-          <input type="color" bind:value={criticalColor} />
+          <input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
         </div>
+        <label class="row"><span class="muted" style="width:180px">When to play zone sound</span>
+          <select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }}>
+            <option value="none">Never</option>
+            <option value="danger">In Danger only</option>
+            <option value="critical">In Critical only</option>
+            <option value="all">Any phase change</option>
+          </select>
+        </label>
+        <label class="row"><span class="muted" style="width:180px">Show notification when entering zone</span>
+          <select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }}>
+            <option value="none">Never</option>
+            <option value="danger">In Danger only</option>
+            <option value="critical">In Critical only</option>
+            <option value="all">Any phase change</option>
+          </select>
+        </label>
+        <label class="row"><input type="checkbox" bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Overlay always stays on top</label>
+        <label class="row"><input type="checkbox" bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Bring overlay to top when timer ends</label>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top: 12px; gap:8px;">
         <button class="action ghost" onclick={() => { resetAll(); settingsOpen = false; }} title="Reset all data">Reset all</button>
@@ -1241,8 +1447,6 @@
     padding: 6px 10px;
   cursor: pointer;
 }
-  .icon.gear {
-  }
   .icon.chat.on {
     border-color: var(--primary);
   }

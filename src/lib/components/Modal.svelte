@@ -22,32 +22,45 @@
 </script>
 
 {#if open}
-  <div class="backdrop" onclick={handleBackdrop}>
-    <div class="sheet card" role="dialog" aria-modal="true">
-      <div class="head">
-        <div class="titles">
-          <h2>{title}</h2>
-          {#if subtitle}<p class="muted">{subtitle}</p>{/if}
-        </div>
-        <button class="close" title="Close" onclick={onclose}>×</button>
-      </div>
-      <div class="body">
-        <slot />
-      </div>
+  <div class="modal-backdrop" on:click={handleBackdrop}>
+    <div class="modal-content">
+      <slot />
     </div>
   </div>
 {/if}
 
 <style>
-.backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-  display: grid; place-items: center; z-index: 9999;
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 10000;
+  background: rgba(0,0,0,0.33);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.sheet { width: min(560px, 92vw); padding: 16px; }
+.sheet {
+  padding: 16px;
+}
+.modal-content {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, 92vw);
+  max-height: 92vh;
+  overflow: auto;
+  z-index: 1010;
+  background: var(--modal-bg, #222d);
+  border-radius: 12px;
+  padding: 24px 20px 18px 20px;
+  box-shadow: 0 8px 48px #000a;
+}
 .head { display: flex; align-items: center; justify-content: space-between; }
 .titles h2 { margin: 0 0 4px 0; }
 .titles p { margin: 0; }
 .close { background: transparent; border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 4px 10px; cursor: pointer; }
-.body { margin-top: 12px; }
+/* .body { margin-top: 12px; } */
 </style>
 

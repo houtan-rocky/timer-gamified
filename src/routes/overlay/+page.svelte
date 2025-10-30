@@ -30,6 +30,10 @@
   const notifyEnabled = false;
   let askOnEnd = $state(true);
   let endQuestionText = $state('Did you achieve your goal?');
+  let editingTime = $state(false);
+  let editTimeStr = $state('');
+  let overlayAlwaysOnTop = false;
+  let forceAlwaysOnTop = $state(false);
 
   function formatTime(totalSeconds: number) {
     const m = Math.floor(totalSeconds / 60)
@@ -160,6 +164,41 @@
   }
   function stopDangerSound() { if (dangerSoundTimer !== null) { clearInterval(dangerSoundTimer); dangerSoundTimer = null; } }
 
+  function openTimeEditor() {
+    if (isRunning) return;
+    editingTime = true;
+    // E.g. 01:05 or 12:21 or 00:08
+    const h = Math.floor(remainingSeconds / 3600);
+    const m = Math.floor((remainingSeconds % 3600) / 60);
+    const s = remainingSeconds % 60;
+    editTimeStr = h ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  function saveTimeEdit() {
+    // Accept hh:mm:ss or mm:ss
+    const parts = editTimeStr.trim().split(':').map(Number);
+    let total = 0;
+    if (parts.length === 3) { total = parts[0]*3600 + parts[1]*60 + parts[2]; }
+    else if (parts.length === 2) { total = parts[0]*60 + parts[1]; }
+    else if (parts.length === 1) { total = parts[0]; }
+    total = Math.max(1, total);
+    remainingSeconds = total;
+    runDurationSeconds = total;
+    initialSeconds = total;
+    editingTime = false;
+  }
+  function cancelTimeEdit() { editingTime = false; }
+
+  function requestOverlayGoNotOnTop() {
+    forceAlwaysOnTop = false;
+    // If overlayAlwaysOnTop isn't true, drop to not-on-top immediately
+    const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
+    if (isTauri && !overlayAlwaysOnTop) {
+      import('@tauri-apps/api/webviewWindow').then(({getCurrentWebviewWindow}) => {
+        getCurrentWebviewWindow().setAlwaysOnTop(false);
+      });
+    }
+  }
+
   onMount(async () => {
     // Parse query params for duration and autostart
     const url = new URL(window.location.href);
@@ -200,6 +239,8 @@
     if (q) {
       try { endQuestionText = decodeURIComponent(q); } catch {}
     }
+    const alwaysOnTopParam = url.searchParams.get("alwaysOnTop");
+    overlayAlwaysOnTop = alwaysOnTopParam === "true";
 
     // Ensure always-on-top if Tauri is available
     const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
@@ -207,7 +248,7 @@
       try {
         const { getCurrentWebviewWindow, WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
         const current = getCurrentWebviewWindow();
-        await current.setAlwaysOnTop(true);
+        await current.setAlwaysOnTop(!!overlayAlwaysOnTop);
         // Ensure it floats across spaces/mission control if supported
         // @ts-expect-error older type defs may not include these options
         await current.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -260,44 +301,66 @@
     if ('BroadcastChannel' in window) {
       bc = new BroadcastChannel('timer-sync');
       bc.onmessage = (e) => {
-        const data = e.data || {};
-        if (data.source === 'overlay') return; // ignore our own
-        if (data.type === 'start') {
-          suppressBroadcast = true;
-          const incomingStart = data.startAtMs ?? Date.now();
-          if (lastStartSig && Math.abs(incomingStart - lastStartSig) < 150) return;
-          initialSeconds = data.duration ?? initialSeconds;
-          runDurationSeconds = data.duration ?? initialSeconds;
-          startAtMs = incomingStart;
-          lastStartSig = startAtMs;
-          criticalPercent = data.critical ?? criticalPercent;
-          dangerPercent = data.danger ?? dangerPercent;
-          if (data.colors) { dangerColor = data.colors.dangerColor ?? dangerColor; criticalColor = data.colors.criticalColor ?? criticalColor; }
-          if (Array.isArray(data.messages)) userMessages = data.messages;
-          start();
-          suppressBroadcast = false;
-        } else if (data.type === 'pause') {
-          suppressBroadcast = true;
-          stop();
-          startAtMs = null;
-          if (typeof data.remaining === 'number') remainingSeconds = data.remaining;
-          suppressBroadcast = false;
-        } else if (data.type === 'end') {
-          // Main timer ended; show question if enabled
-          stop();
-          hasEnded = true;
-          resultRecorded = false;
-        } else if (data.type === 'result') {
-          // Main recorded a result; hide our question promptly
-          resultRecorded = true;
-          hasEnded = true;
-        } else if (data.type === 'reset') {
-          suppressBroadcast = true;
-          initialSeconds = data.duration ?? initialSeconds; reset();
-          suppressBroadcast = false;
-        } else if (data.type === 'preset') {
-          initialSeconds = data.duration ?? initialSeconds; remainingSeconds = initialSeconds;
-        }
+        (async () => {
+          const data = e.data || {};
+          if (data.source === 'overlay') return; // ignore our own
+          if (data.type === 'start') {
+            suppressBroadcast = true;
+            const incomingStart = data.startAtMs ?? Date.now();
+            if (lastStartSig && Math.abs(incomingStart - lastStartSig) < 150) return;
+            initialSeconds = data.duration ?? initialSeconds;
+            runDurationSeconds = data.duration ?? initialSeconds;
+            startAtMs = incomingStart;
+            lastStartSig = startAtMs;
+            criticalPercent = data.critical ?? criticalPercent;
+            dangerPercent = data.danger ?? dangerPercent;
+            if (data.colors) { dangerColor = data.colors.dangerColor ?? dangerColor; criticalColor = data.colors.criticalColor ?? criticalColor; }
+            if (Array.isArray(data.messages)) userMessages = data.messages;
+            start();
+            suppressBroadcast = false;
+          } else if (data.type === 'pause') {
+            suppressBroadcast = true;
+            stop();
+            startAtMs = null;
+            if (typeof data.remaining === 'number') remainingSeconds = data.remaining;
+            suppressBroadcast = false;
+          } else if (data.type === 'end') {
+            // Main timer ended; show question if enabled
+            stop();
+            hasEnded = true;
+            resultRecorded = false;
+          } else if (data.type === 'result') {
+            // Main recorded a result; hide our question promptly
+            resultRecorded = true;
+            hasEnded = true;
+          } else if (data.type === 'reset') {
+            suppressBroadcast = true;
+            initialSeconds = data.duration ?? initialSeconds; reset();
+            suppressBroadcast = false;
+          } else if (data.type === 'preset') {
+            initialSeconds = data.duration ?? initialSeconds; remainingSeconds = initialSeconds;
+          } else if (data.source === 'main' && data.type === 'overlay_settings') {
+            if (typeof data.alwaysOnTop === 'boolean') {
+              overlayAlwaysOnTop = data.alwaysOnTop;
+              if (isTauri) {
+                const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                const current = getCurrentWebviewWindow();
+                await current.setAlwaysOnTop(overlayAlwaysOnTop);
+              }
+            }
+            if (data.type === 'overlay_popup') {
+              forceAlwaysOnTop = true;
+              const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
+              if (isTauri) {
+                import('@tauri-apps/api/webviewWindow').then(({getCurrentWebviewWindow}) => {
+                  getCurrentWebviewWindow().setAlwaysOnTop(true);
+                  getCurrentWebviewWindow().setFocus();
+                  getCurrentWebviewWindow().show();
+                });
+              }
+            }
+          }
+        })();
       };
       try { bc.postMessage({ type: 'request_state' }); } catch {}
     }
@@ -320,7 +383,8 @@
   }
 </script>
 
-<main class="overlay {zoneFromPercent(currentPercent()).toLowerCase()} {remainingSeconds===0 ? 'ended' : ''}" data-tauri-drag-region style={`--danger:${dangerColor}; --critical:${criticalColor}` }>
+<main class="overlay {zoneFromPercent(currentPercent()).toLowerCase()} {remainingSeconds===0 ? 'ended' : ''}" data-tauri-drag-region style={`--danger:${dangerColor}; --critical:${criticalColor}` } onpointerdown={requestOverlayGoNotOnTop}>
+
   <button class="overlay-exit" title="Close" onclick={async () => {
     try {
       try { bc?.postMessage({ source: 'overlay', type: 'close' }); } catch {}
@@ -344,9 +408,12 @@
       <button class="no" onclick={() => recordResult(false)} title="No">✖</button>
     </div>
   {:else}
-    <div class="time">{formatTime(remainingSeconds)}</div>
-    <div class="bar">
-      <div class="fill" style={`width: ${(1 - Math.max(0, remainingSeconds) / Math.max(1, initialSeconds)) * 100}%`}></div>
+    <div class="time" role="button" tabindex="0" onclick={openTimeEditor} onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') openTimeEditor(); }} title="Click to edit time">
+      {#if editingTime}
+        <input type="text" class="edit-time-text" bind:value={editTimeStr} autofocus pattern="(\d{1,2}:)?\d{1,2}:\d{2}" onblur={saveTimeEdit} onkeydown={e => { if (e.key === 'Enter') saveTimeEdit(); else if (e.key === 'Escape') cancelTimeEdit(); }} style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;" />
+      {:else}
+        {formatTime(remainingSeconds)}
+      {/if}
     </div>
   {/if}
   <div class="buttons">
@@ -370,10 +437,20 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
+  height: 100%; /* was 100% or fixed at too small, increase height */
+  overflow: hidden;
   -webkit-app-region: drag;
-  padding: 0;
 }
+
+/* Add interior padding to main content containers for clean look */
+.buttons,
+.time,
+.bar {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+/* If any section looks crowded, increase vertical gap or min-height instead of outer padding */
+.top, .overlay-exit { overflow: visible; }
 
 .overlay.ok { background: transparent; }
 .overlay.danger { background: color-mix(in srgb, var(--danger) 10%, transparent); }
@@ -423,6 +500,11 @@ button:active { background-color: #e8e8e8; }
 }
 .overlay-exit {
   position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  vertical-align: center;
   left: 6px;
   top: 50%;
   transform: translateY(-50%);
@@ -432,9 +514,11 @@ button:active { background-color: #e8e8e8; }
   background: rgba(0,0,0,0.35);
   border: 1px solid var(--card-border, #2a2a2a);
   border-radius: 12px;
-  width: 26px; height: 26px;
+  width: 20px; height: 20px;
   display: grid; place-items: center;
   color: #fff;
+  padding: 0;
+  margin: 0;
 }
 .overlay:hover .overlay-exit { opacity: 0.8; }
 .question { font-size: 18px; font-weight: 600; -webkit-app-region: no-drag; }
@@ -445,6 +529,42 @@ button:active { background-color: #e8e8e8; }
 }
 .result-buttons .yes { background: rgba(0, 255, 128, 0.25); }
 .result-buttons .no { background: rgba(255, 64, 64, 0.25); }
+.drag-handle {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  background: linear-gradient(180deg, #3336 65%, transparent 100%);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 2;
+  margin-bottom: 2px;
+}
+.drag-icon {
+  font-size: 22px;
+  color: #b8b8b8aa;
+  opacity: 0.68;
+  letter-spacing: 4px;
+  pointer-events: none;
+}
+.edit-time-ui input {
+  font-size: 1em; text-align: center; margin: 0 3px; padding: 2px 4px; border-radius: 5px; border: 1px solid #8884;
+}
+.edit-time-ui button {
+  margin-left: 4px;
+  font-size: 1em;
+  background: #272727;
+  color: #eee;
+  border: 1px solid #444d;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+.edit-time-ui button:hover { background: #467; color: #fff; }
+.time[title] { cursor: pointer; }
 </style>
 
 
