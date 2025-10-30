@@ -197,7 +197,9 @@ button.selected {
   letter-spacing: 2px;
 }
 
-.controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.controls { display: flex;
+  padding: 8px;
+   gap: 8px; flex-wrap: wrap; }
 .controls .view { margin-left: auto; }
 .add { display: flex; gap: 8px; align-items: center; }
 .remove { padding: 0.4em 0.8em; }

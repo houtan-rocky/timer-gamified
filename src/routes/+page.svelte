@@ -162,7 +162,12 @@
   }
   function colorFor(w: number, l: number) {
     const total = w + l;
-    if (total === 0) return '#1f1f1f';
+    // Detect theme: direct body class if present
+    let isLight = false;
+    if (typeof document !== 'undefined') {
+      isLight = document.body.classList.contains('theme-light');
+    }
+    if (total === 0) return isLight ? '#e6eee1' : '#1f1f1f';
     const ratio = w / total; // 1 => all wins, 0 => all losses
     const green = Math.round(100 + 155 * ratio);
     const red = Math.round(100 + 155 * (1 - ratio));
@@ -180,7 +185,8 @@
     const recs = loadRecords();
     recs.push({ ts: Date.now(), result: win ? 'win' : 'loss' });
     saveRecords(recs);
-    recomputeToday();
+    recomputeToday(); // Immediately updates heatmap
+    heatmapKey += 1; // Force heatmap re-render
     showEndQuestion = false;
     // Let overlay hide its question too
     try { broadcast({ type: 'result', ts: Date.now(), result: win ? 'win' : 'loss' }); } catch {}
@@ -221,6 +227,7 @@
   let zoneNotifyMode: 'none' | 'danger' | 'critical' | 'all' = $state('none');
   let zoneNotifFired = new Set<string>(); // tracks zone notifications for this run
   let messageFireTimestamps: Record<number, number> = {};
+  let heatmapKey = $state(0);
 
   function resetZoneNotifFired() {
     zoneNotifFired = new Set<string>();
@@ -466,12 +473,12 @@
     } catch (e) {
       console.error("Failed to show overlay window", e);
     }
-  }
+  }2
 
   async function openPictureInPicture(totalSeconds: number) {
     // Create a canvas we can stream into PiP
     const width = 360,
-      height = 200;
+      height = 100;
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -700,7 +707,7 @@
         // Cooldown: do not fire if fired in last 2s
         if (messageFireTimestamps[i] && now - messageFireTimestamps[i] < 2000) continue;
         messageFireTimestamps[i] = now;
-        m.fired = true;
+        m.fired = true; // Set fired immediately
         notifyDesktop("Timer message", m.text);
         playMessageSound(m.sound, m.custom);
       }
@@ -921,6 +928,18 @@
   }
   const weekDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
+  let colorTheme = $state(localStorage.getItem('colorTheme') || 'dark');
+  $effect(() => {
+    document.body.classList.toggle('theme-dark', colorTheme === 'dark');
+    document.body.classList.toggle('theme-light', colorTheme === 'light');
+    if (bc) bc.postMessage({ type: 'theme', theme: colorTheme });
+  });
+  function setTheme(t: string) {
+    colorTheme = t;
+    localStorage.setItem('colorTheme', t);
+    if (bc) bc.postMessage({ type: 'theme', theme: colorTheme });
+  }
+
   if (typeof window !== "undefined") {
     if ("BroadcastChannel" in window) {
       if (!bc) bc = new BroadcastChannel("timer-sync");
@@ -958,6 +977,7 @@
           recs.push({ ts: when, result });
           saveRecords(recs);
           recomputeToday();
+          heatmapKey += 1; // Force heatmap re-render on main page
           showEndQuestion = false;
           if (overlayPopupOnEnd) {
             const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
@@ -1133,6 +1153,7 @@
   <div class="stats">Today: {wins}/{losses}</div>
 
   <section class="heatmap-wrap">
+    {#key heatmapKey}
     <div class="heatmap-grid">
       <!-- Month labels on first row, at visually correct columns -->
       {#each buildMonthLabels(buildYearWeeks()) as ml}
@@ -1150,6 +1171,7 @@
         {/each}
       {/each}
     </div>
+    {/key}
   </section>
 
   <div class="controls">
@@ -1342,6 +1364,12 @@
         </label>
         <label class="row"><input type="checkbox" bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Overlay always stays on top</label>
         <label class="row"><input type="checkbox" bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Bring overlay to top when timer ends</label>
+        <label class="row"><span class="muted" style="width:180px">Color Theme</span>
+          <select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)}>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
       </div>
       <div class="row" style="justify-content:flex-end; margin-top: 12px; gap:8px;">
         <button class="action ghost" onclick={() => { resetAll(); settingsOpen = false; }} title="Reset all data">Reset all</button>
@@ -1420,6 +1448,9 @@
     font-size: 12px;
   }
 
+  .display, .time, .overlay .time {
+    font-family: 'Play', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
   .display {
     font-size: 64px;
   text-align: center;
@@ -1431,6 +1462,8 @@
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
+    padding: 8px;
+    border-radius: 8px;
   }
   .selects select {
     background: #0f0f0f;
@@ -1475,9 +1508,12 @@
     border-color: var(--primary);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent);
   }
-  .icon.gear,
-  .icon.chat {
+  .icon.gear {
     font-size: 20px;
+    line-height: 1;
+  }
+  .icon.chat {
+    font-size: 10px;
     line-height: 1;
   }
   .tooltip {
@@ -1521,7 +1557,14 @@
   }
   .heatmap-wrap .hm-month { grid-row:1; font-size: 10px; color: var(--muted); }
   .heatmap-wrap .hm-wlabel { grid-column:1; font-size: 10px; color: var(--muted); justify-self: end; }
-  .heatmap-wrap .hm-cell { width:12px; height:12px; border-radius:2px; }
+  .heatmap-wrap .hm-cell {
+    width:12px;
+    height:12px;
+    border-radius:2px;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--card-border) 35%, transparent);
+  }
   .heatmap-wrap .hm-cell.today { outline: 1px solid var(--primary); outline-offset: 1px; }
 
   @media (prefers-color-scheme: dark) {

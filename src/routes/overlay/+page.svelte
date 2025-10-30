@@ -34,6 +34,12 @@
   let editTimeStr = $state('');
   let overlayAlwaysOnTop = false;
   let forceAlwaysOnTop = $state(false);
+  let colorTheme = 'dark';
+  function updateOverlayTheme(newTheme: string) {
+    colorTheme = newTheme;
+    document.body.classList.toggle('theme-dark', colorTheme === 'dark');
+    document.body.classList.toggle('theme-light', colorTheme === 'light');
+  }
 
   function formatTime(totalSeconds: number) {
     const m = Math.floor(totalSeconds / 60)
@@ -359,11 +365,19 @@
                 });
               }
             }
+          } else if (data.type === 'theme' && data.theme) {
+            updateOverlayTheme(data.theme);
           }
         })();
       };
       try { bc.postMessage({ type: 'request_state' }); } catch {}
     }
+
+    // onMount: try to read from current body or localStorage
+    const localTheme = localStorage.getItem('colorTheme');
+    if (localTheme) updateOverlayTheme(localTheme);
+    else if (document.body.classList.contains('theme-light')) updateOverlayTheme('light');
+    else updateOverlayTheme('dark');
   });
 
   function loadRecords(): Array<{ ts: number; result: 'win' | 'loss' }> {
@@ -376,10 +390,9 @@
   function recordResult(win: boolean) {
     if (resultRecorded !== false) return;
     resultRecorded = true;
-    const recs = loadRecords();
-    recs.push({ ts: Date.now(), result: win ? 'win' : 'loss' });
-    saveRecords(recs);
+    // Do NOT persist locally here to avoid duplicates. Only notify main.
     try { bc?.postMessage({ source: 'overlay', type: 'result', ts: Date.now(), result: win ? 'win' : 'loss' }); } catch {}
+    hasEnded = true;
   }
 </script>
 
@@ -404,8 +417,16 @@
   {#if hasEnded && askOnEnd && !resultRecorded}
     <div class="question">{endQuestionText}</div>
     <div class="result-buttons">
-      <button class="yes" onclick={() => recordResult(true)} title="Yes">✓</button>
-      <button class="no" onclick={() => recordResult(false)} title="No">✖</button>
+      <button class="yes" onclick={() => recordResult(true)} title="Yes" aria-label="Yes">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor"/>
+        </svg>
+      </button>
+      <button class="no" onclick={() => recordResult(false)} title="No" aria-label="No">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor"/>
+        </svg>
+      </button>
     </div>
   {:else}
     <div class="time" role="button" tabindex="0" onclick={openTimeEditor} onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') openTimeEditor(); }} title="Click to edit time">
@@ -433,13 +454,15 @@
 .overlay {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%; /* was 100% or fixed at too small, increase height */
+  height: 100%;
+  padding: 6px 8px;
   overflow: hidden;
   -webkit-app-region: drag;
+  text-align: center;
 }
 
 /* Add interior padding to main content containers for clean look */
@@ -460,6 +483,8 @@
   font-size: 40px;
   letter-spacing: 2px;
   animation: pulse 2s infinite ease-in-out;
+  font-family: 'Play', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
 }
 .overlay.ended .time { animation: none; }
 .overlay.danger .time { animation-duration: 1.25s; color: var(--danger); text-shadow: 0 0 12px color-mix(in srgb, var(--danger) 50%, transparent); }
@@ -475,13 +500,13 @@
 
 .top { position: absolute; top: 6px; left: 8px; right: 8px; display: flex; justify-content: space-between; font-size: 12px; opacity: 0.9; -webkit-app-region: no-drag; }
 
-.buttons { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+.buttons { display: flex; gap: 6px; -webkit-app-region: no-drag; justify-content: center; width: 100%; }
 
 button {
   border-radius: 8px;
   border: 1px solid transparent;
-  padding: 0.4em 0.8em;
-  font-size: 0.9em;
+  padding: 0.32em 0.7em;
+  font-size: 0.85em;
   font-weight: 500;
   font-family: inherit;
   color: #0f0f0f;
@@ -498,6 +523,13 @@ button:active { background-color: #e8e8e8; }
   button { color: #ffffff; background-color: #0f0f0f98; }
   button:active { background-color: #0f0f0f69; }
 }
+/* Force correct light theme button styling even if system is dark */
+:global(.theme-light) button {
+  color: #17191b;
+  background-color: #ffffff;
+  border: 1px solid #d3dbe3;
+}
+:global(.theme-light) button:active { background-color: #e8e8e8; }
 .overlay-exit {
   position: absolute;
   display: flex;
@@ -522,10 +554,10 @@ button:active { background-color: #e8e8e8; }
 }
 .overlay:hover .overlay-exit { opacity: 0.8; }
 .question { font-size: 18px; font-weight: 600; -webkit-app-region: no-drag; }
-.result-buttons { display: flex; gap: 12px; -webkit-app-region: no-drag; }
+.result-buttons { display: flex; gap: 10px; -webkit-app-region: no-drag; justify-content: center; }
 .result-buttons .yes, .result-buttons .no {
   width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--card-border, #2a2a2a);
-  background: rgba(0,0,0,0.35); color: #fff; font-size: 22px; display: grid; place-items: center;
+  background: rgba(0,0,0,0.35); color: #fff; font-size: 0; display: grid; place-items: center;
 }
 .result-buttons .yes { background: rgba(0, 255, 128, 0.25); }
 .result-buttons .no { background: rgba(255, 64, 64, 0.25); }
