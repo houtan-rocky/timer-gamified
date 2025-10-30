@@ -207,7 +207,7 @@
         const p = Math.max(0, Math.min(1, progress));
         // Nudge macOS Dock to show immediately
         if (p === 0) await win.setProgressBar({ progress: 0.001, status: ProgressBarStatus.Normal });
-        await win.setProgressBar({ progress: p, status: ProgressBarStatus.Normal }); // status helps on Windows
+        await win.setProgressBar({ progress: p, status: ProgressBarStatus.Normal });
       }
     } catch {}
   }
@@ -261,6 +261,7 @@
       intervalId = null;
     }
     intervalId = window.setInterval(() => {
+      autoMessageThisTickFired = false;
       if (!startAtMs) return;
       const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
       const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
@@ -274,11 +275,91 @@
         );
       }
       if (remainingSeconds === 0) {
+        // Ensure audio context is resumed before end sound
+        try {
+          // lazily create or resume context
+          if (!audioCtx) {
+            // @ts-ignore
+            const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
+            if (Ctx) audioCtx = new Ctx();
+          }
+          audioCtx?.resume?.();
+        } catch {}
         playEndSound();
         stopDangerSound();
         stopCriticalSound();
+        const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+        if (overlayPopupOnEnd && isTauri) {
+          (async () => {
+            try {
+              // Request user attention (dock/taskbar bounce)
+              try {
+                const appMod: any = await import("@tauri-apps/api/app");
+                await appMod.getCurrent?.().requestUserAttention?.('Critical');
+              } catch {}
+              const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+              let overlay = await WebviewWindow.getByLabel("overlay");
+              if (!overlay) {
+                const params = new URLSearchParams({
+                  duration: String(selectedSeconds),
+                  autostart: "0",
+                  critical: String(criticalPercent),
+                  danger: String(dangerPercent),
+                  msgs: encodeURIComponent(
+                    btoa(
+                      unescape(
+                        encodeURIComponent(
+                          JSON.stringify(
+                            userMessages.map(({ percent, text, sound, custom }) => ({ percent, text, sound, custom }))
+                          )
+                        )
+                      )
+                    )
+                  ),
+                  snd: dangerSound,
+                  csnd: criticalSound,
+                  startAt: String(Math.floor(Date.now())),
+                  dangerColor,
+                  criticalColor,
+                  ask: askOnEnd ? '1' : '0',
+                  q: encodeURIComponent(endQuestionText),
+                  alwaysOnTop: '1',
+                  popupOnEnd: '1',
+                });
+                const w = new WebviewWindow("overlay", {
+                  url: `/overlay?${params.toString()}`,
+                  title: "Timer Overlay",
+                  width: 260,
+                  height: 140,
+                  resizable: true,
+                  decorations: true,
+                  alwaysOnTop: true,
+                  focus: true,
+                  visible: true,
+                  shadow: true,
+                  skipTaskbar: false,
+                  x: 0,
+                  y: 0,
+                });
+                await new Promise<void>((resolve, reject) => {
+                  w.once("tauri://created", () => resolve());
+                  w.once("tauri://error", (e) => reject(e));
+                });
+                overlay = w;
+              }
+              // Bring to front directly
+              try { await overlay.unminimize?.(); } catch {}
+              try { await overlay.setVisibleOnAllWorkspaces?.(true); } catch {}
+              try { await overlay.setAlwaysOnTop(true); } catch {}
+              try { await overlay.setFocus(); } catch {}
+              try { await overlay.show(); } catch {}
+              // Also broadcast as fallback
+              try { broadcast({ type: 'overlay_popup' }); } catch {}
+            } catch {}
+          })();
+        }
         handleTimerEnd();
-        if (!suppressBroadcast) broadcast({ type: "end" });
+        broadcast({ type: "end" });
         stop();
       }
     }, 1000);
@@ -445,13 +526,13 @@
       title: "Timer Overlay",
       width: 260,
       height: 140,
-      resizable: false,
-      decorations: false,
+      resizable: true,
+      decorations: true,
       alwaysOnTop: overlayAlwaysOnTop,
       focus: true,
       visible: true,
       shadow: true,
-      skipTaskbar: true,
+      skipTaskbar: false,
       x: 0,
       y: 0,
     });
@@ -672,7 +753,15 @@
     }
   }
 
+  let autoMessageThisTickFired = false;
+  // Top-level:
+  let lastTickTimestamp = 0;
+
   function handleTick() {
+    // Only allow one tick event per second globally (per window)
+    const now = Date.now();
+    if (Math.abs(now - lastTickTimestamp) < 950) return;
+    lastTickTimestamp = now;
     if (!autoMessagesEnabled) return;
     const pct = currentPercent();
     const zone = zoneFromPercent(pct);
@@ -700,7 +789,6 @@
         stopCriticalSound();
       }
     }
-    const now = Date.now();
     for (let i = 0; i < userMessages.length; ++i) {
       const m = userMessages[i];
       if (!m.fired && pct <= m.percent) {
@@ -941,6 +1029,29 @@
   }
 
   if (typeof window !== "undefined") {
+    (async () => {
+      const isTauri = (window as any).__TAURI_INTERNALS__;
+      if (!isTauri) return;
+      try {
+        const { getCurrentWebviewWindow, WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        const current = getCurrentWebviewWindow();
+        await current.onCloseRequested(async (event) => {
+          // Ask if timer is currently running
+          if (isRunning) {
+            const ok = typeof window !== 'undefined' ? window.confirm('The timer is running. Quit and stop the timer?') : true;
+            if (!ok) {
+              event.preventDefault();
+              return;
+            }
+          }
+          // Close overlay if present before the app exits
+          try {
+            const overlay = await WebviewWindow.getByLabel("overlay");
+            await overlay?.close();
+          } catch {}
+        });
+      } catch {}
+    })();
     if ("BroadcastChannel" in window) {
       if (!bc) bc = new BroadcastChannel("timer-sync");
       bc.onmessage = (e) => {
@@ -986,6 +1097,8 @@
                 const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
                 const overlay = await WebviewWindow.getByLabel("overlay");
                 if (overlay) {
+                  await overlay.unminimize?.();
+                  await overlay.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true });
                   await overlay.show();
                   await overlay.setAlwaysOnTop(true); // force top if option enabled
                   await overlay.setFocus();
@@ -1010,6 +1123,7 @@
             intervalId = null;
           }
           intervalId = window.setInterval(() => {
+            autoMessageThisTickFired = false;
             if (!startAtMs) return;
             const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
             const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
@@ -1059,6 +1173,8 @@
                 const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
                 const overlay = await WebviewWindow.getByLabel("overlay");
                 if (overlay) {
+                  await overlay.unminimize?.();
+                  await overlay.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true });
                   await overlay.show();
                   await overlay.setAlwaysOnTop(true); // force top if option enabled
                   await overlay.setFocus();

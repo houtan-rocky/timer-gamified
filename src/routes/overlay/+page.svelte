@@ -37,6 +37,7 @@
   let overlayAlwaysOnTop = false;
   let forceAlwaysOnTop = $state(false);
   let colorTheme = 'dark';
+  let bringingToFront = false;
   function updateOverlayTheme(newTheme: string) {
     colorTheme = newTheme;
     document.body.classList.toggle('theme-dark', colorTheme === 'dark');
@@ -176,10 +177,11 @@
     if (isRunning) return;
     editingTime = true;
     editError = '';
-    // E.g. 01:05 or 12:21 or 00:08
-    const h = Math.floor(remainingSeconds / 3600);
-    const m = Math.floor((remainingSeconds % 3600) / 60);
-    const s = remainingSeconds % 60;
+    // Use last selected duration, not remaining (which can be 00:00)
+    const base = initialSeconds;
+    const h = Math.floor(base / 3600);
+    const m = Math.floor((base % 3600) / 60);
+    const s = base % 60;
     editTimeStr = h ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   }
   function saveTimeEdit() {
@@ -265,7 +267,7 @@
       try { endQuestionText = decodeURIComponent(q); } catch {}
     }
     const alwaysOnTopParam = url.searchParams.get("alwaysOnTop");
-    overlayAlwaysOnTop = alwaysOnTopParam === "true";
+    overlayAlwaysOnTop = (alwaysOnTopParam === "1" || alwaysOnTopParam === "true");
 
     // Ensure always-on-top if Tauri is available
     const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
@@ -275,8 +277,7 @@
         const current = getCurrentWebviewWindow();
         await current.setAlwaysOnTop(!!overlayAlwaysOnTop);
         // Ensure it floats across spaces/mission control if supported
-        // @ts-expect-error older type defs may not include these options
-        await current.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        await current.setVisibleOnAllWorkspaces(true);
         // Restore last position (default top-left)
         try {
           const posStr = localStorage.getItem('overlayPos');
@@ -373,19 +374,71 @@
                 await current.setAlwaysOnTop(overlayAlwaysOnTop);
               }
             }
-            if (data.type === 'overlay_popup') {
-              forceAlwaysOnTop = true;
-              const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
-              if (isTauri) {
-                import('@tauri-apps/api/webviewWindow').then(({getCurrentWebviewWindow}) => {
-                  getCurrentWebviewWindow().setAlwaysOnTop(true);
-                  getCurrentWebviewWindow().setFocus();
-                  getCurrentWebviewWindow().show();
-                });
-              }
+          } else if (data.source === 'main' && data.type === 'overlay_popup') {
+            if (isTauri && !bringingToFront) {
+              bringingToFront = true;
+              import('@tauri-apps/api/webviewWindow').then(async ({getCurrentWebviewWindow}) => {
+                const current = getCurrentWebviewWindow();
+                try {
+                  // Ensure audio context is active before beeping
+                  // @ts-ignore
+                  const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
+                  if (Ctx && !audioCtx) audioCtx = new Ctx();
+                  await audioCtx?.resume?.();
+                } catch {}
+                try { await current.setAlwaysOnTop(true); } catch {}
+                try { await current.show(); } catch {}
+                try { await current.unminimize?.(); } catch {}
+                try { await current.setFocus(); } catch {}
+                // Always provide an audible cue on popup
+                try { playBeep(300, 1200); } catch {}
+                setTimeout(() => { bringingToFront = false; }, 350);
+              });
             }
           } else if (data.type === 'theme' && data.theme) {
             updateOverlayTheme(data.theme);
+          } else if (data.type === 'state') {
+            // Main responded with current state; sync overlay to it
+            suppressBroadcast = true;
+            const incomingDuration = typeof data.duration === 'number' ? data.duration : initialSeconds;
+            const incomingRemaining = typeof data.remaining === 'number' ? data.remaining : remainingSeconds;
+            const incomingStartAt = typeof data.startAtMs === 'number' ? data.startAtMs : null;
+            const incomingRunning = !!data.isRunning;
+            initialSeconds = incomingDuration;
+            runDurationSeconds = incomingDuration;
+            if (incomingStartAt && incomingRunning) {
+              startAtMs = incomingStartAt;
+              isRunning = true;
+              // restart interval loop to compute remaining from startAtMs
+              if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+              intervalId = window.setInterval(() => {
+                if (!startAtMs) return;
+                const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+                const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
+                if (nextRemaining !== remainingSeconds) {
+                  remainingSeconds = nextRemaining;
+                  // lightweight tick handling, no rebroadcast
+                  const p = currentPercent(); const z = zoneFromPercent(p); if (z !== prevZone) { prevZone = z; }
+                }
+                if (remainingSeconds === 0) {
+                  stopDangerSound();
+                  stop();
+                  hasEnded = true;
+                }
+              }, 1000);
+            } else {
+              // Not running: adopt remaining or default to duration
+              isRunning = false;
+              startAtMs = null;
+              if (typeof incomingRemaining === 'number') remainingSeconds = incomingRemaining; else remainingSeconds = initialSeconds;
+              if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+            }
+            // Sync colors/messages if provided
+            if (data.critical != null) criticalPercent = data.critical;
+            if (data.danger != null) dangerPercent = data.danger;
+            if (data.colors) { dangerColor = data.colors.dangerColor ?? dangerColor; criticalColor = data.colors.criticalColor ?? criticalColor; }
+            if (Array.isArray(data.messages)) userMessages = data.messages;
+            suppressBroadcast = false;
           }
         })();
       };
@@ -427,18 +480,7 @@
 
 <main class="overlay {zoneFromPercent(currentPercent()).toLowerCase()} {remainingSeconds===0 ? 'ended' : ''}" data-tauri-drag-region style={`--danger:${dangerColor}; --critical:${criticalColor}` } onpointerdown={requestOverlayGoNotOnTop}>
 
-  <button class="overlay-exit" title="Close" onclick={async () => {
-    try {
-      try { bc?.postMessage({ source: 'overlay', type: 'close' }); } catch {}
-      const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__;
-      if (isTauri) {
-        const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-        await getCurrentWebviewWindow().close();
-      } else {
-        window.close();
-      }
-    } catch { window.close(); }
-  }}>⨯</button>
+
   <div class="top">
     <div class="left">{now.toLocaleDateString()}</div>
     <div class="right">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
@@ -461,7 +503,8 @@
     <div class="time" role="button" tabindex="0" onclick={openTimeEditor} onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') openTimeEditor(); }} title="Click to edit time">
       {#if editingTime}
         <div class="time-edit-wrap">
-          <input type="text" class="edit-time-text" bind:value={editTimeStr} bind:this={editInputEl} autofocus pattern="(\d{1,2}:)?\d{1,2}:\d{2}" onblur={saveTimeEdit} onkeydown={e => { if (e.key === 'Enter') saveTimeEdit(); else if (e.key === 'Escape') cancelTimeEdit(); }} style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;" />
+          <!-- @ts-ignore -->
+          <input type="text" class="edit-time-text" bind:value={editTimeStr} bind:this={editInputEl} autofocus pattern="(\\d{1,2}:)?\\d{1,2}:\\d{2}" onblur={saveTimeEdit} onkeydown={e => { if (e.key === 'Enter') saveTimeEdit(); else if (e.key === 'Escape') cancelTimeEdit(); }} style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;" />
           {#if editError}
             <div class="edit-error">{editError}</div>
           {/if}
@@ -485,6 +528,10 @@
 </main>
 
 <style>
+:global(html, body) { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+:global(body) { overscroll-behavior: contain; }
+:global(*), :global(*::before), :global(*::after) { box-sizing: border-box; }
+:global(::-webkit-scrollbar) { width: 0; height: 0; }
 .overlay {
   display: flex;
   flex-direction: column;
