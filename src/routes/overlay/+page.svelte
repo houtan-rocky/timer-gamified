@@ -44,6 +44,12 @@
   let progressBarFinishedColor = $state("#ff0000");
   let progressBarType = $state("full");
   let overlayBackgroundImage = $state<string | null>(null);
+  let showConfetti = $state(false);
+  type CelebrationType = "both" | "confetti" | "sound" | "none";
+  type SuccessSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
+  let celebrationType = $state<CelebrationType>("both");
+  let successSound: SuccessSound = $state("triple");
+  let successSoundCustom: string | undefined = undefined;
   function updateOverlayTheme(newTheme: string) {
     colorTheme = newTheme;
     document.body.classList.toggle("theme-dark", colorTheme === "dark");
@@ -252,6 +258,31 @@
   function playHeartbeat() {
     playBeep(80, 150);
     setTimeout(() => playBeep(80, 150), 180);
+  }
+
+  function playTripleBeep() {
+    playBeep(120, 1200);
+    setTimeout(() => playBeep(120, 1200), 200);
+    setTimeout(() => playBeep(120, 1200), 400);
+  }
+
+  const successAudioCache: Record<string, HTMLAudioElement> = {};
+  function playSuccessSound() {
+    if (successSound === "none") return;
+    if (successSound === "triple") return playTripleBeep();
+    if (successSound === "beep") return playBeep(300, 1500);
+    if (successSound === "heartbeat") return playHeartbeat();
+    if (successSound === "custom" && successSoundCustom) {
+      let el = successAudioCache[successSoundCustom];
+      if (!el) {
+        el = new Audio(successSoundCustom);
+        successAudioCache[successSoundCustom] = el;
+      }
+      try {
+        el.currentTime = 0;
+        el.play();
+      } catch {}
+    }
   }
   function startDangerSound() {
     stopDangerSound();
@@ -590,6 +621,18 @@
             if (typeof data.progressBarType === "string") {
               progressBarType = data.progressBarType;
             }
+          } else if (data.source === "main" && data.type === "celebration_settings") {
+            if (typeof data.celebrationType === "string") {
+              celebrationType = data.celebrationType as CelebrationType;
+            }
+            if (typeof data.successSound === "string") {
+              successSound = data.successSound as SuccessSound;
+            }
+            if (typeof data.successSoundCustom === "string") {
+              successSoundCustom = data.successSoundCustom;
+            } else if (data.successSoundCustom === null || data.successSoundCustom === undefined) {
+              successSoundCustom = undefined;
+            }
           } else if (data.source === "main" && data.type === "overlay_background") {
             overlayBackgroundImage = data.backgroundImage || null;
           } else if (data.source === "main" && data.type === "overlay_popup") {
@@ -741,6 +784,27 @@
   function recordResult(win: boolean) {
     if (resultRecorded !== false) return;
     resultRecorded = true;
+    if (win) {
+      // Show confetti based on celebration type
+      if (celebrationType === "both" || celebrationType === "confetti") {
+        showConfetti = true;
+        setTimeout(() => {
+          showConfetti = false;
+        }, 3000);
+      }
+      // Play success sound based on celebration type
+      if (celebrationType === "both" || celebrationType === "sound") {
+        // Ensure audio context is available
+        try {
+          if (!audioCtx) {
+            const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+            if (Ctx) audioCtx = new Ctx();
+          }
+          audioCtx?.resume?.();
+        } catch {}
+        playSuccessSound();
+      }
+    }
     try {
       bc?.postMessage({
         source: "overlay",
@@ -797,6 +861,30 @@
   {#if overlayMode === "progressbar" && progressBarType === "full"}
     <div class="absolute left-0 top-0 bottom-0 w-full pointer-events-none [-webkit-app-region:no-drag] z-0">
       <div class="absolute left-0 top-0 bottom-0 transition-[width] duration-200 ease-linear opacity-80" style={`width: ${progressPercent()}%; background-color: ${remainingSeconds === 0 ? progressBarFinishedColor : progressBarColor};`}></div>
+    </div>
+  {/if}
+  
+  <!-- Confetti animation -->
+  {#if showConfetti}
+    <div class="fixed inset-0 pointer-events-none [-webkit-app-region:no-drag] z-50 overflow-hidden">
+      {#each Array(80) as _, i}
+        {@const angle = (i * 137.5) % 360}
+        {@const delay = (i * 15) % 200}
+        {@const duration = 2500 + (i % 800)}
+        {@const colors = ['#8ef59b', '#ffd700', '#ff6b6b', '#4ecdc4', '#ffe66d', '#ff9ff3', '#54a0ff', '#95e1d3', '#f38181', '#fce38a']}
+        {@const color = colors[i % colors.length]}
+        {@const size = 10 + (i % 8)}
+        {@const startLeft = 50}
+        {@const startTop = 45}
+        {@const angleRad = (i * 137.5 * Math.PI / 180)}
+        {@const distance = 30 + (i % 20) * 2}
+        {@const translateX = Math.cos(angleRad) * distance}
+        {@const translateY = Math.sin(angleRad) * distance + 40}
+        <div 
+          class="absolute confetti-particle rounded-sm"
+          style={`left: ${startLeft}%; top: ${startTop}%; width: ${size}px; height: ${size}px; background: linear-gradient(135deg, ${color}, ${color}dd); box-shadow: 0 0 8px ${color}aa; --translate-x: ${translateX}vw; --translate-y: ${translateY}vh; animation: confetti-burst ${duration}ms ${delay}ms ease-out forwards;`}
+        ></div>
+      {/each}
     </div>
   {/if}
   <!-- Header with date/time and zone indicator -->

@@ -42,6 +42,11 @@
   type EndSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
   let endSound: EndSound = $state("triple");
   let endSoundCustom: string | undefined = undefined;
+  type CelebrationType = "both" | "confetti" | "sound" | "none";
+  let celebrationType = $state<CelebrationType>("both");
+  type SuccessSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
+  let successSound: SuccessSound = $state("triple");
+  let successSoundCustom = $state<string | undefined>(undefined);
   let hasFiredEndSound = false;
   let overlayOpen = $state(false);
   
@@ -276,6 +281,15 @@
   let licenseKeyInput = $state("");
   let licenseError = $state("");
   let helpMenuOpen = $state(false);
+  // Accordion states for settings
+  let accordionOpen = $state<Record<string, boolean>>({
+    zones: true,
+    messages: false,
+    endOfTimer: false,
+    celebration: false,
+    overlay: false,
+    appearance: false,
+  });
 
   async function checkLicense(): Promise<boolean> {
     try {
@@ -1042,6 +1056,25 @@
     setTimeout(() => playBeep(120, 1200), 400);
   }
 
+  const successAudioCache: Record<string, HTMLAudioElement> = {};
+  function playSuccessSound() {
+    if (successSound === "none") return;
+    if (successSound === "triple") return playTripleBeep();
+    if (successSound === "beep") return playBeep(300, 1500);
+    if (successSound === "heartbeat") return playHeartbeat();
+    if (successSound === "custom" && successSoundCustom) {
+      let el = successAudioCache[successSoundCustom];
+      if (!el) {
+        el = new Audio(successSoundCustom);
+        successAudioCache[successSoundCustom] = el;
+      }
+      try {
+        el.currentTime = 0;
+        el.play();
+      } catch {}
+    }
+  }
+
   const endAudioCache: Record<string, HTMLAudioElement> = {};
   function playEndSound() {
     if (hasFiredEndSound) return;
@@ -1118,6 +1151,8 @@
     try {
       localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd, overlayMode, overlayProgressBarColor, overlayProgressBarFinishedColor, overlayProgressBarType }));
       if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop, overlayMode: overlayMode, progressBarColor: overlayProgressBarColor, progressBarFinishedColor: overlayProgressBarFinishedColor, progressBarType: overlayProgressBarType});
+      // Also broadcast celebration settings to overlay
+      if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom});
     } catch {}
   }
   function loadOverlaySettings() {
@@ -1158,6 +1193,9 @@
         overlayPopupOnEnd,
         appBackgroundImage,
         overlayBackgroundImage,
+        celebrationType,
+        successSound,
+        successSoundCustom,
       };
       localStorage.setItem('appSettings', JSON.stringify(state));
     } catch {}
@@ -1192,7 +1230,18 @@
         if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
         if (typeof v.appBackgroundImage === 'string') appBackgroundImage = v.appBackgroundImage;
         if (typeof v.overlayBackgroundImage === 'string') overlayBackgroundImage = v.overlayBackgroundImage;
+        if (typeof v.celebrationType === 'string') celebrationType = v.celebrationType;
+        if (typeof v.successSound === 'string') successSound = v.successSound;
+        if (typeof v.successSoundCustom === 'string') successSoundCustom = v.successSoundCustom;
       }
+      // Broadcast celebration settings to overlay after loading (with delay to ensure bc is initialized)
+      setTimeout(() => {
+        if (bc) {
+          try {
+            bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom});
+          } catch {}
+        }
+      }, 100);
     } catch { }
   }
   // Call loadAppSettings() immediately on startup
@@ -1804,216 +1853,353 @@
       subtitle="Configure zones, messages and sounds"
       onclose={() => (settingsOpen = false)}
     >
-      <div class="grid gap-3">
-        <label class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Critical threshold (%)</span>
-          <Input type="range" min={0} max={99} bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
-          <span>{criticalPercent}%</span>
-        </label>
-        <label class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Danger threshold (%)</span>
-          <Input type="range" min={0} max={99} bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
-          <span>{dangerPercent}%</span>
-        </label>
-        <div class="[color:var(--color-muted)] text-xs">
-          Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.
-        </div>
-
-        <div class="mt-3 font-semibold">Messages (trigger when remaining ≤ %)</div>
-        {#each userMessages as msg, idx}
-          <div class="flex gap-2 items-center">
-            <Input
-              type="number"
-              min={1}
-              max={99}
-              bind:value={msg.percent}
-              class="w-20 p-2"
-            />
-            <Input
-              type="text"
-              bind:value={msg.text}
-              placeholder="Message to show"
-              class="flex-1 p-2"
-            />
-            <Select bind:value={msg.sound} class="p-2">
-              <option value="beep">Beep</option>
-              <option value="heartbeat">Heartbeat</option>
-              <option value="none">None</option>
-              <option value="custom">Custom</option>
-            </Select>
-            {#if msg.sound === "custom"}
-              <input
-                type="file"
-                accept="audio/*"
-                onchange={async (e) => {
-                  const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => { msg.custom = String(reader.result || ""); };
-                  reader.readAsDataURL(file);
-                }}
-                class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-1"
-              />
-            {/if}
-            <button
-              class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
-              title="Remove"
-              onclick={() => (userMessages = userMessages.filter((_, i) => i !== idx))}>×</button>
-          </div>
-        {/each}
-        <div class="flex gap-3">
+      <div class="grid gap-2">
+        <!-- Timer Zones Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
           <button
-            class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer"
-            onclick={() => (userMessages = [...userMessages, { percent: 30, text: "Keep going!", sound: "beep" }])}
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.zones = !accordionOpen.zones}
+          >
+            <span>Timer Zones</span>
+            <span class="transform transition-transform {accordionOpen.zones ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.zones}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Critical threshold (%)</span>
+                <Input type="range" min={0} max={99} bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
+                <span>{criticalPercent}%</span>
+              </label>
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Danger threshold (%)</span>
+                <Input type="range" min={0} max={99} bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
+                <span>{dangerPercent}%</span>
+              </label>
+              <div class="[color:var(--color-muted)] text-xs">
+                Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.
+              </div>
+              <div class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Danger color</span>
+                <Input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
+              </div>
+              <div class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Critical color</span>
+                <Input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
+              </div>
+              <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">When to play zone sound</span>
+                <Select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
+                  <option value="none">Never</option>
+                  <option value="danger">In Danger only</option>
+                  <option value="critical">In Critical only</option>
+                  <option value="all">Any phase change</option>
+                </Select>
+              </label>
+              <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Show notification when entering zone</span>
+                <Select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
+                  <option value="none">Never</option>
+                  <option value="danger">In Danger only</option>
+                  <option value="critical">In Critical only</option>
+                  <option value="all">Any phase change</option>
+                </Select>
+              </label>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Auto Messages Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
+          <button
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.messages = !accordionOpen.messages}
+          >
+            <span>Auto Messages</span>
+            <span class="transform transition-transform {accordionOpen.messages ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.messages}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <div class="text-sm [color:var(--color-muted)]">Messages (trigger when remaining ≤ %)</div>
+              {#each userMessages as msg, idx}
+                <div class="flex gap-2 items-center">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={99}
+                    bind:value={msg.percent}
+                    class="w-20 p-2"
+                  />
+                  <Input
+                    type="text"
+                    bind:value={msg.text}
+                    placeholder="Message to show"
+                    class="flex-1 p-2"
+                  />
+                  <Select bind:value={msg.sound} class="p-2">
+                    <option value="beep">Beep</option>
+                    <option value="heartbeat">Heartbeat</option>
+                    <option value="none">None</option>
+                    <option value="custom">Custom</option>
+                  </Select>
+                  {#if msg.sound === "custom"}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onchange={async (e) => {
+                        const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => { msg.custom = String(reader.result || ""); };
+                        reader.readAsDataURL(file);
+                      }}
+                      class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-1"
+                    />
+                  {/if}
+                  <button
+                    class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
+                    title="Remove"
+                    onclick={() => (userMessages = userMessages.filter((_, i) => i !== idx))}>×</button>
+                </div>
+              {/each}
+
+              <div class="flex gap-3">
+          <button
+                  class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer"
+                  onclick={() => { userMessages = [...userMessages, { percent: 30, text: "Keep going!", sound: "beep" }]; saveAppSettings(); }}
             title="Add message">＋</button>
+              </div>
+            </div>
+          {/if}
         </div>
 
-        <div class="mt-3 font-semibold">End question</div>
-        <Checkbox bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} label="Ask when timer ends" />
-        <label class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Question text</span>
-          <Input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 p-2" />
+        <!-- End of Timer Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
+          <button
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.endOfTimer = !accordionOpen.endOfTimer}
+          >
+            <span>End of Timer</span>
+            <span class="transform transition-transform {accordionOpen.endOfTimer ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.endOfTimer}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <Checkbox bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} label="Ask when timer ends" />
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Question text</span>
+                <Input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 p-2" />
         </label>
-
-        <div class="mt-3 font-semibold">Zone colors</div>
-        <div class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Danger color</span>
-          <Input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
+            </div>
+          {/if}
         </div>
-        <div class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Critical color</span>
-          <Input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
-        </div>
-        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">When to play zone sound</span>
-          <Select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
-            <option value="none">Never</option>
-            <option value="danger">In Danger only</option>
-            <option value="critical">In Critical only</option>
-            <option value="all">Any phase change</option>
-          </Select>
-        </label>
-        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Show notification when entering zone</span>
-          <Select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
-            <option value="none">Never</option>
-            <option value="danger">In Danger only</option>
-            <option value="critical">In Critical only</option>
-            <option value="all">Any phase change</option>
-          </Select>
-        </label>
-        <Checkbox bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Overlay always stays on top" />
-        <Checkbox bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Bring overlay to top when timer ends" />
-        
-        <div class="mt-3 font-semibold">Overlay Mode</div>
-        <label class="flex gap-3 items-center">
-          <span class="[color:var(--color-muted)] w-[180px]">Mode</span>
-          <Select bind:value={overlayMode} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
-            <option value="normal">Normal</option>
-            <option value="progressbar">Progress Bar</option>
-          </Select>
-        </label>
-        {#if overlayMode === "progressbar"}
-          <label class="flex gap-3 items-center">
-            <span class="[color:var(--color-muted)] w-[180px]">Progress bar color</span>
-            <Input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
-          </label>
-          <label class="flex gap-3 items-center">
-            <span class="[color:var(--color-muted)] w-[180px]">Progress bar finished color</span>
-            <Input type="color" bind:value={overlayProgressBarFinishedColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
-          </label>
-          <label class="flex gap-3 items-center">
-            <span class="[color:var(--color-muted)] w-[180px]">Progress bar type</span>
-            <Select bind:value={overlayProgressBarType} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
-              <option value="full">Full</option>
-            </Select>
-          </label>
-        {/if}
-        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Color Theme</span>
-          <Select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 p-2">
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </Select>
-        </label>
 
-        <div class="mt-3 font-semibold">Background Images</div>
-        <label class="flex flex-col gap-2">
-          <span class="[color:var(--color-muted)] text-sm">App Background</span>
-          <div class="flex gap-2 items-center">
-            <input
-              type="file"
-              accept="image/*"
-              class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
-              onchange={async (e) => {
-                const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    appBackgroundImage = reader.result as string;
-                    saveAppSettings();
-                  };
-                  reader.readAsDataURL(file);
-                }
-              }}
-            />
-            {#if appBackgroundImage}
-              <button
-                class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
-                onclick={() => {
-                  appBackgroundImage = null;
-                  saveAppSettings();
-                }}
-              >
-                Remove
-              </button>
-            {/if}
-      </div>
-        </label>
-        <label class="flex flex-col gap-2">
-          <span class="[color:var(--color-muted)] text-sm">Overlay Background</span>
-          <div class="flex gap-2 items-center">
-            <input
-              type="file"
-              accept="image/*"
-              class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
-              onchange={async (e) => {
-                const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    overlayBackgroundImage = reader.result as string;
-                    saveAppSettings();
-                    // Broadcast to overlay
-                    if (bc) {
-                      bc.postMessage({
-                        source: 'main',
-                        type: 'overlay_background',
-                        backgroundImage: overlayBackgroundImage
-                      });
-                    }
-                  };
-                  reader.readAsDataURL(file);
-                }
-              }}
-            />
-            {#if overlayBackgroundImage}
-              <button
-                class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
-                onclick={() => {
-                  overlayBackgroundImage = null;
-                  saveAppSettings();
-                  if (bc) {
-                    bc.postMessage({
-                      source: 'main',
-                      type: 'overlay_background',
-                      backgroundImage: null
-                    });
-                  }
-                }}
-              >
-                Remove
-              </button>
-            {/if}
-          </div>
-        </label>
+        <!-- Success Celebration Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
+          <button
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.celebration = !accordionOpen.celebration}
+          >
+            <span>Success Celebration</span>
+            <span class="transform transition-transform {accordionOpen.celebration ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.celebration}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Celebration type</span>
+                <Select bind:value={celebrationType} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom}); }} class="flex-1 p-2">
+                  <option value="both">Confetti + Sound</option>
+                  <option value="confetti">Confetti only</option>
+                  <option value="sound">Sound only</option>
+                  <option value="none">None</option>
+                </Select>
+              </label>
+              {#if celebrationType === "both" || celebrationType === "sound"}
+                <label class="flex gap-3 items-center">
+                  <span class="[color:var(--color-muted)] w-[180px]">Success sound</span>
+                  <Select bind:value={successSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom}); }} class="flex-1 p-2">
+                    <option value="triple">Triple beep</option>
+                    <option value="beep">Beep</option>
+                    <option value="heartbeat">Heartbeat</option>
+                    <option value="none">None</option>
+                    <option value="custom">Custom file</option>
+                  </Select>
+                </label>
+                {#if successSound === "custom"}
+                  <label class="flex flex-col gap-2">
+                    <span class="[color:var(--color-muted)] text-sm">Custom success sound file</span>
+                    <input
+                    type="file"
+                    accept="audio/*"
+                      class="text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
+                      onchange={async (e) => {
+                        const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            successSoundCustom = reader.result as string;
+                            saveAppSettings();
+                            if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom});
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                    {#if successSoundCustom}
+                      <button
+                        class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+                        onclick={() => {
+                          successSoundCustom = undefined;
+                          saveAppSettings();
+                          if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom: undefined});
+                        }}
+                      >
+                        Remove custom sound
+                      </button>
+                    {/if}
+                  </label>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Overlay Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
+          <button
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.overlay = !accordionOpen.overlay}
+          >
+            <span>Overlay</span>
+            <span class="transform transition-transform {accordionOpen.overlay ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.overlay}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <Checkbox bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Overlay always stays on top" />
+              <Checkbox bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Bring overlay to top when timer ends" />
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Mode</span>
+                <Select bind:value={overlayMode} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
+                  <option value="normal">Normal</option>
+                  <option value="progressbar">Progress Bar</option>
+                </Select>
+              </label>
+              {#if overlayMode === "progressbar"}
+                <label class="flex gap-3 items-center">
+                  <span class="[color:var(--color-muted)] w-[180px]">Progress bar color</span>
+                  <Input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
+                </label>
+                <label class="flex gap-3 items-center">
+                  <span class="[color:var(--color-muted)] w-[180px]">Progress bar finished color</span>
+                  <Input type="color" bind:value={overlayProgressBarFinishedColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
+                </label>
+                <label class="flex gap-3 items-center">
+                  <span class="[color:var(--color-muted)] w-[180px]">Progress bar type</span>
+                  <Select bind:value={overlayProgressBarType} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
+                    <option value="full">Full</option>
+                  </Select>
+                </label>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Appearance Accordion -->
+        <div class="border rounded-lg [border-color:var(--color-card-border)] overflow-hidden">
+          <button
+            class="w-full flex items-center justify-between px-4 py-3 font-semibold text-lg [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={() => accordionOpen.appearance = !accordionOpen.appearance}
+          >
+            <span>Appearance</span>
+            <span class="transform transition-transform {accordionOpen.appearance ? 'rotate-180' : ''}">▼</span>
+          </button>
+          {#if accordionOpen.appearance}
+            <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
+              <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Color Theme</span>
+                <Select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 p-2">
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </Select>
+              </label>
+              <div class="text-sm font-semibold [color:var(--color-muted)]">Background Images</div>
+              <label class="flex flex-col gap-2">
+                <span class="[color:var(--color-muted)] text-sm">App Background</span>
+                <div class="flex gap-2 items-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
+                    onchange={async (e) => {
+                      const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          appBackgroundImage = reader.result as string;
+                          saveAppSettings();
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                  {#if appBackgroundImage}
+                    <button
+                      class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+                      onclick={() => {
+                        appBackgroundImage = null;
+                        saveAppSettings();
+                      }}
+                    >
+                      Remove
+                    </button>
+                  {/if}
+                </div>
+              </label>
+              <label class="flex flex-col gap-2">
+                <span class="[color:var(--color-muted)] text-sm">Overlay Background</span>
+                <div class="flex gap-2 items-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
+                    onchange={async (e) => {
+                      const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          overlayBackgroundImage = reader.result as string;
+                          saveAppSettings();
+                          // Broadcast to overlay
+                          if (bc) {
+                            bc.postMessage({
+                              source: 'main',
+                              type: 'overlay_background',
+                              backgroundImage: overlayBackgroundImage
+                            });
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                  {#if overlayBackgroundImage}
+                    <button
+                      class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+                      onclick={() => {
+                        overlayBackgroundImage = null;
+                        saveAppSettings();
+                        if (bc) {
+                          bc.postMessage({
+                            source: 'main',
+                            type: 'overlay_background',
+                            backgroundImage: null
+                          });
+                        }
+                      }}
+                    >
+                      Remove
+                    </button>
+                  {/if}
+                </div>
+              </label>
+            </div>
+          {/if}
+        </div>
       </div>
       <div class="flex justify-end gap-2 mt-3">
         <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={() => { resetAll(); settingsOpen = false; }} title="Reset all data">Reset all</button>

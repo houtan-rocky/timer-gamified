@@ -101,3 +101,17 @@ body {
     transform: scale(1);
   }
 }
+
+@keyframes confetti-burst {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--translate-x, 0px), var(--translate-y, 100px)) rotate(1080deg) scale(0);
+  }
+}
