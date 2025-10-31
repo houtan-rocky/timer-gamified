@@ -1,5 +1,6 @@
 <script lang="ts">
   // Tauri API will be imported dynamically only when available
+  import Input from "../lib/components/Input.svelte";
 
   let presets = $state<number[]>([120, 600, 1200]);
   let selectedSeconds = $state(120);
@@ -130,7 +131,7 @@
           {minutes(p)} min
         </button>
         <div class="flex gap-1.5 items-center">
-          <input type="number" min="1" value={minutes(p)} oninput={(e) => updatePreset(p, Number(e.currentTarget.value))} class="w-16 rounded-lg border [border-color:var(--color-card-border)] px-2 py-1" />
+          <Input type="number" min={1} value={minutes(p)} oninput={(e) => updatePreset(p, Number((e.currentTarget as HTMLInputElement).value))} class="w-16 px-2 py-1" />
           <button class="rounded-lg border border-transparent py-1.5 px-3 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" title="Remove" onclick={() => removePreset(p)}>×</button>
         </div>
       </div>
@@ -138,7 +139,7 @@
   </div>
 
   <div class="flex gap-2 items-center">
-    <input type="number" min="1" bind:value={newPresetMinutes} class="w-20 rounded-lg border [border-color:var(--color-card-border)] px-2 py-1" />
+    <Input type="number" min={1} bind:value={newPresetMinutes} class="w-20 px-2 py-1" />
     <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" onclick={addPreset}>Add preset (min)</button>
   </div>
 

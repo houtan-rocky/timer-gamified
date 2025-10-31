@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
+  import Input from "../../lib/components/Input.svelte";
 
   let initialSeconds = $state(60);
   let remainingSeconds = $state(initialSeconds);
@@ -30,17 +31,19 @@
   let resultRecorded = $state(false);
   const notifyEnabled = false;
   let askOnEnd = $state(true);
-  let endQuestionText = $state("Did you achieve your goal?");
+  let endQuestionText = $state("Win?");
   let editingTime = $state(false);
   let editTimeStr = $state("");
   let editError = $state("");
-  let editInputEl: HTMLInputElement | null = null;
+  let editInputEl: any = null;
   let overlayAlwaysOnTop = false;
   let colorTheme = "dark";
   let bringingToFront = false;
   let overlayMode = $state("normal");
   let progressBarColor = $state("#8ef59b");
+  let progressBarFinishedColor = $state("#ff0000");
   let progressBarType = $state("full");
+  let overlayBackgroundImage = $state<string | null>(null);
   function updateOverlayTheme(newTheme: string) {
     colorTheme = newTheme;
     document.body.classList.toggle("theme-dark", colorTheme === "dark");
@@ -87,6 +90,7 @@
         stopDangerSound();
         pause();
         hasEnded = true;
+        resultRecorded = false; // Reset so question can show
       }
     }, 1000);
     if (!suppressBroadcast) {
@@ -356,12 +360,23 @@
     const alwaysOnTopParam = url.searchParams.get("alwaysOnTop");
     const overlayModeParam = url.searchParams.get("overlayMode");
     const progressBarColorParam = url.searchParams.get("progressBarColor");
+    const progressBarFinishedColorParam = url.searchParams.get("progressBarFinishedColor");
     const progressBarTypeParam = url.searchParams.get("progressBarType");
+    const overlayBackgroundImageParam = url.searchParams.get("overlayBackgroundImage");
     overlayAlwaysOnTop =
       alwaysOnTopParam === "1" || alwaysOnTopParam === "true";
     if (overlayModeParam) overlayMode = overlayModeParam;
     if (progressBarColorParam) progressBarColor = progressBarColorParam;
+    if (progressBarFinishedColorParam) progressBarFinishedColor = progressBarFinishedColorParam;
     if (progressBarTypeParam) progressBarType = progressBarTypeParam;
+    if (overlayBackgroundImageParam && overlayBackgroundImageParam.length > 0) {
+      try {
+        overlayBackgroundImage = decodeURIComponent(overlayBackgroundImageParam);
+      } catch {
+        // If decoding fails, try direct assignment (may already be decoded)
+        overlayBackgroundImage = overlayBackgroundImageParam;
+      }
+    }
 
     const isTauri =
       typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
@@ -513,9 +528,14 @@
             if (typeof data.progressBarColor === "string") {
               progressBarColor = data.progressBarColor;
             }
+            if (typeof data.progressBarFinishedColor === "string") {
+              progressBarFinishedColor = data.progressBarFinishedColor;
+            }
             if (typeof data.progressBarType === "string") {
               progressBarType = data.progressBarType;
             }
+          } else if (data.source === "main" && data.type === "overlay_background") {
+            overlayBackgroundImage = data.backgroundImage || null;
           } else if (data.source === "main" && data.type === "overlay_popup") {
             if (isTauri && !bringingToFront) {
               bringingToFront = true;
@@ -564,6 +584,9 @@
             const incomingStartAt =
               typeof data.startAtMs === "number" ? data.startAtMs : null;
             const incomingRunning = !!data.isRunning;
+            // Update end question settings
+            if (typeof data.askOnEnd === 'boolean') askOnEnd = data.askOnEnd;
+            if (typeof data.endQuestionText === 'string') endQuestionText = data.endQuestionText;
             initialSeconds = incomingDuration;
             runDurationSeconds = incomingDuration;
             if (incomingStartAt && incomingRunning) {
@@ -589,6 +612,7 @@
                   stopDangerSound();
                   pause();
                   hasEnded = true;
+                  resultRecorded = false; // Reset so question can show
                 }
               }, 1000);
             } else {
@@ -608,7 +632,12 @@
               dangerColor = data.colors.dangerColor ?? dangerColor;
               criticalColor = data.colors.criticalColor ?? criticalColor;
             }
-            if (Array.isArray(data.messages)) userMessages = data.messages;
+            if (Array.isArray(data.messages)) {
+              userMessages = data.messages.map((msg: any) => ({ 
+                ...msg, 
+                fired: msg.fired || false 
+              }));
+            }
             suppressBroadcast = false;
           }
         })();
@@ -646,22 +675,44 @@
             "@tauri-apps/api/webviewWindow"
           );
           const current = getCurrentWebviewWindow();
+          // Resize back to normal after answering
           await current.setSize(new LogicalSize(260, 140));
         } catch {}
       })();
     }
   }
+  
+  // Watch for when question should appear and resize window
+  $effect(() => {
+    if (hasEnded && askOnEnd && !resultRecorded) {
+      const isTauri =
+        typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+      if (isTauri) {
+        (async () => {
+          try {
+            const { getCurrentWebviewWindow } = await import(
+              "@tauri-apps/api/webviewWindow"
+            );
+            const { LogicalSize } = await import("@tauri-apps/api/dpi");
+            const current = getCurrentWebviewWindow();
+            // Resize to accommodate the question and buttons
+            await current.setSize(new LogicalSize(300, 200));
+          } catch {}
+        })();
+      }
+    }
+  });
 </script>
 
 <main
   class="relative flex flex-col gap-1.5 items-center justify-center w-full h-full px-2 py-1.5 overflow-hidden [-webkit-app-region:drag] text-center {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()).toLowerCase() === 'ok' ? 'bg-transparent' : zoneFromPercent(currentPercent()).toLowerCase() === 'danger' ? '[background:color-mix(in_srgb,var(--danger)_10%,transparent)]' : zoneFromPercent(currentPercent()).toLowerCase() === 'critical' ? '[background:color-mix(in_srgb,var(--critical)_12%,transparent)]' : '') : 'bg-transparent'} {remainingSeconds === 0 ? 'ended' : ''}"
   data-tauri-drag-region
-  style={`--danger:${dangerColor}; --critical:${criticalColor}`}
+  style={`--danger:${dangerColor}; --critical:${criticalColor}; ${overlayBackgroundImage ? `background-image: url(${overlayBackgroundImage}); background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed;` : ''}`}
   onpointerdown={requestOverlayGoNotOnTop}
 >
   {#if overlayMode === "progressbar" && progressBarType === "full"}
     <div class="absolute left-0 top-0 bottom-0 w-full pointer-events-none [-webkit-app-region:no-drag] z-0">
-      <div class="absolute left-0 top-0 bottom-0 transition-[width] duration-200 ease-linear opacity-80" style={`width: ${progressPercent()}%; background-color: ${progressBarColor};`}></div>
+      <div class="absolute left-0 top-0 bottom-0 transition-[width] duration-200 ease-linear opacity-80" style={`width: ${progressPercent()}%; background-color: ${remainingSeconds === 0 ? progressBarFinishedColor : progressBarColor};`}></div>
     </div>
   {/if}
   <div class="absolute top-1.5 left-2 right-2 z-10 flex justify-between text-xs opacity-90 [-webkit-app-region:no-drag]">
@@ -670,32 +721,34 @@
   </div>
   <div class="relative z-10 flex flex-col items-center justify-center flex-1 w-full">
   {#if hasEnded && askOnEnd && !resultRecorded}
-    <div class="text-lg font-semibold [-webkit-app-region:no-drag]">{endQuestionText}</div>
-    <div class="flex gap-2.5 [-webkit-app-region:no-drag] justify-center">
-      <button
-        class="w-11 h-11 rounded-xl border border-[var(--card-border,#2a2a2a)] bg-black/35 text-white text-[0] grid place-items-center bg-[rgba(0,255,128,0.25)] [-webkit-app-region:no-drag]"
-        onclick={() => recordResult(true)}
-        title="Yes"
-        aria-label="Yes"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
-        </svg>
-      </button>
-      <button
-        class="w-11 h-11 rounded-xl border border-[var(--card-border,#2a2a2a)] bg-black/35 text-white text-[0] grid place-items-center bg-[rgba(255,64,64,0.25)] [-webkit-app-region:no-drag]"
-        onclick={() => recordResult(false)}
-        title="No"
-        aria-label="No"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
-        </svg>
-      </button>
+    <div class="flex flex-col items-center gap-4 [-webkit-app-region:no-drag]">
+      <div class="text-xl font-semibold [color:var(--color-foreground)] text-center px-4">{endQuestionText}</div>
+      <div class="flex gap-4 justify-center items-center">
+        <button
+          class="w-16 h-16 rounded-xl border-2 border-[rgba(0,255,128,0.6)] bg-[rgba(0,255,128,0.2)] hover:bg-[rgba(0,255,128,0.3)] hover:border-[rgba(0,255,128,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(0,255,128,0.3)] [-webkit-app-region:no-drag] group"
+          onclick={() => recordResult(true)}
+          title="Yes"
+          aria-label="Yes"
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+            <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
+          </svg>
+        </button>
+        <button
+          class="w-16 h-16 rounded-xl border-2 border-[rgba(255,64,64,0.6)] bg-[rgba(255,64,64,0.2)] hover:bg-[rgba(255,64,64,0.3)] hover:border-[rgba(255,64,64,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(255,64,64,0.3)] [-webkit-app-region:no-drag] group"
+          onclick={() => recordResult(false)}
+          title="No"
+          aria-label="No"
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+            <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
     </div>
   {:else}
     <div
-      class="text-4xl tracking-wider font-['Play',Inter,ui-sans-serif,system-ui,sans-serif] text-center w-full px-4 animate-[pulse_2s_ease-in-out_infinite] cursor-pointer {remainingSeconds === 0 ? 'animate-none' : ''} {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()) === 'DANGER' ? '[animation-duration:1.25s] [color:var(--danger)] [text-shadow:0_0_12px_color-mix(in_srgb,var(--danger)_50%,transparent)]' : zoneFromPercent(currentPercent()) === 'CRITICAL' ? '[animation-duration:0.75s] [color:var(--critical)] [text-shadow:0_0_14px_color-mix(in_srgb,var(--critical)_55%,transparent)]' : '') : ''} theme-light:[color:#17191b] theme-light:[text-shadow:none] [-webkit-app-region:no-drag]"
+      class="text-4xl tracking-wider game-font text-center w-full px-4 animate-[pulse_2s_ease-in-out_infinite] cursor-pointer {remainingSeconds === 0 ? 'animate-none' : ''} {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()) === 'DANGER' ? '[animation-duration:1.25s] [color:var(--danger)] [text-shadow:0_0_12px_color-mix(in_srgb,var(--danger)_50%,transparent)]' : zoneFromPercent(currentPercent()) === 'CRITICAL' ? '[animation-duration:0.75s] [color:var(--critical)] [text-shadow:0_0_14px_color-mix(in_srgb,var(--critical)_55%,transparent)]' : '') : ''} theme-light:[color:#17191b] theme-light:[text-shadow:none] [-webkit-app-region:no-drag]"
       role="button"
       tabindex="0"
       onclick={openTimeEditor}
@@ -706,11 +759,11 @@
     >
       {#if editingTime}
         <div class="flex flex-col items-center gap-1">
-          <input
+          <Input
             type="text"
             class="w-[86px] text-center text-base rounded-[7px] border border-[#8884] p-0.5"
             bind:value={editTimeStr}
-            bind:this={editInputEl}
+            bind:editInputEl={editInputEl}
             autofocus={true}
             onblur={saveTimeEdit}
             onkeydown={(e) => {

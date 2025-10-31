@@ -2,7 +2,14 @@
   import { ProgressBarStatus } from "@tauri-apps/api/window";
   import Button from "../lib/components/Button.svelte";
   import Modal from "../lib/components/Modal.svelte";
-  let presets = $state<number[]>([120, 600, 1200]);
+  import Input from "../lib/components/Input.svelte";
+  import Checkbox from "../lib/components/Checkbox.svelte";
+  import Select from "../lib/components/Select.svelte";
+  // Check if we're in dev mode
+  const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
+  
+  // Add 5-second preset in dev mode
+  let presets = $state<number[]>(isDev ? [5, 120, 600, 1200] : [120, 600, 1200]);
   let selectedSeconds = $state(120);
   let remainingSeconds = $state(selectedSeconds);
   let isRunning = $state(false);
@@ -38,7 +45,7 @@
   let overlayOpen = $state(false);
   // End question settings
   let askOnEnd = $state(true);
-  let endQuestionText = $state('Did you achieve your goal?');
+  let endQuestionText = $state('Win?');
   let showEndQuestion = $state(false);
   function isFreshStart() {
     return !isRunning && remainingSeconds === selectedSeconds;
@@ -229,6 +236,92 @@
   let messageFireTimestamps: Record<number, number> = {};
   let heatmapKey = $state(0);
 
+  // Licensing system (backend-controlled)
+  let isLicensed = $state(false);
+  let licenseModalOpen = $state(false);
+  let licenseKeyInput = $state("");
+  let licenseError = $state("");
+  let helpMenuOpen = $state(false);
+
+  async function checkLicense(): Promise<boolean> {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const result = await invoke<boolean>("check_license");
+      isLicensed = result;
+      return result;
+    } catch (error) {
+      console.error("Failed to check license:", error);
+      isLicensed = false;
+      return false;
+    }
+  }
+
+  async function activateLicense() {
+    licenseError = "";
+    const key = licenseKeyInput.trim();
+    
+    if (!key) {
+      licenseError = "Please enter a license key";
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const result = await invoke<boolean>("activate_license", { key });
+      
+      if (result) {
+        isLicensed = true;
+        licenseModalOpen = false;
+        licenseKeyInput = "";
+        helpMenuOpen = false;
+      } else {
+        licenseError = "Failed to activate license";
+      }
+    } catch (error: any) {
+      // Backend returns error as string in Tauri
+      licenseError = typeof error === 'string' ? error : error?.message || "Failed to activate license";
+    }
+  }
+
+  function openChangeLicense() {
+    licenseKeyInput = "";
+    licenseError = "";
+    licenseModalOpen = true;
+    helpMenuOpen = false;
+  }
+
+  async function removeLicense() {
+    if (!confirm('Are you sure you want to remove the license key? The app will require activation on next launch.')) {
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const result = await invoke<boolean>("remove_license");
+      
+      if (result) {
+        isLicensed = false;
+        licenseModalOpen = true;
+        helpMenuOpen = false;
+        licenseKeyInput = "";
+        licenseError = "";
+      }
+    } catch (error: any) {
+      console.error("Failed to remove license:", error);
+      alert("Failed to remove license. Please try again.");
+    }
+  }
+
+  // Check license on mount
+  $effect(() => {
+    (async () => {
+      const licensed = await checkLicense();
+      if (!licensed) {
+        licenseModalOpen = true;
+      }
+    })();
+  });
+
   function resetZoneNotifFired() {
     zoneNotifFired = new Set<string>();
   }
@@ -251,6 +344,7 @@
 
   function start() {
     if (isRunning) return;
+    if (!isLicensed) return;
     isRunning = true;
     if (remainingSeconds <= 0) remainingSeconds = selectedSeconds;
     runDurationSeconds = selectedSeconds;
@@ -300,6 +394,7 @@
               const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
               let overlay = await WebviewWindow.getByLabel("overlay");
               if (!overlay) {
+                // Create overlay if it doesn't exist
                 const params = new URLSearchParams({
                   duration: String(selectedSeconds),
                   autostart: "0",
@@ -323,8 +418,13 @@
                   criticalColor,
                   ask: askOnEnd ? '1' : '0',
                   q: encodeURIComponent(endQuestionText),
-                  alwaysOnTop: '1',
+                  alwaysOnTop: overlayAlwaysOnTop ? '1' : '0',
                   popupOnEnd: '1',
+                  overlayMode: overlayMode,
+                  progressBarColor: overlayProgressBarColor,
+                  progressBarFinishedColor: overlayProgressBarFinishedColor,
+                  progressBarType: overlayProgressBarType,
+                  overlayBackgroundImage: overlayBackgroundImage ? encodeURIComponent(overlayBackgroundImage) : '',
                 });
                 const w = new WebviewWindow("overlay", {
                   url: `/overlay?${params.toString()}`,
@@ -333,7 +433,7 @@
                   height: 140,
                   resizable: true,
                   decorations: true,
-                  alwaysOnTop: true,
+                  alwaysOnTop: overlayAlwaysOnTop,
                   focus: true,
                   visible: true,
                   shadow: true,
@@ -344,18 +444,24 @@
                 await new Promise<void>((resolve, reject) => {
                   w.once("tauri://created", () => resolve());
                   w.once("tauri://error", (e) => reject(e));
+                  setTimeout(() => reject(new Error("Timeout")), 5000);
                 });
                 overlay = w;
+                overlayOpen = true;
               }
-              // Bring to front directly
+              // Always bring to front when timer ends (if overlay exists)
+              if (overlay) {
               try { await overlay.unminimize?.(); } catch {}
               try { await overlay.setVisibleOnAllWorkspaces?.(true); } catch {}
-              try { await overlay.setAlwaysOnTop(true); } catch {}
-              try { await overlay.setFocus(); } catch {}
+                try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop || true); } catch {}
               try { await overlay.show(); } catch {}
+                try { await overlay.setFocus(); } catch {}
+              }
               // Also broadcast as fallback
               try { broadcast({ type: 'overlay_popup' }); } catch {}
-            } catch {}
+            } catch (e) {
+              console.error("Failed to popup overlay on timer end:", e);
+            }
           })();
         }
         handleTimerEnd();
@@ -378,6 +484,7 @@
   }
 
   function stop() {
+    if (!isLicensed) return;
     isRunning = false;
     if (intervalId !== null) {
       clearInterval(intervalId);
@@ -396,6 +503,7 @@
   }
 
   function reset() {
+    if (!isLicensed) return;
     stop();
     remainingSeconds = selectedSeconds;
     prevZone = null;
@@ -508,7 +616,9 @@
       popupOnEnd: overlayPopupOnEnd ? '1' : '0',
       overlayMode: overlayMode,
       progressBarColor: overlayProgressBarColor,
+      progressBarFinishedColor: overlayProgressBarFinishedColor,
       progressBarType: overlayProgressBarType,
+      overlayBackgroundImage: overlayBackgroundImage ? encodeURIComponent(overlayBackgroundImage) : '',
     });
     if (!isTauri) {
       location.href = `/overlay?${params.toString()}`;
@@ -759,12 +869,15 @@
   let autoMessageThisTickFired = false;
   // Top-level:
   let lastTickTimestamp = 0;
+  // Track messages that have been fired this tick to prevent duplicates within same tick
+  let messagesFiredThisTick = new Set<number>();
 
   function handleTick() {
     // Only allow one tick event per second globally (per window)
     const now = Date.now();
     if (Math.abs(now - lastTickTimestamp) < 950) return;
     lastTickTimestamp = now;
+    messagesFiredThisTick.clear(); // Reset per-tick tracking
     if (!autoMessagesEnabled) return;
     const pct = currentPercent();
     const zone = zoneFromPercent(pct);
@@ -794,13 +907,16 @@
     }
     for (let i = 0; i < userMessages.length; ++i) {
       const m = userMessages[i];
-      if (!m.fired && pct <= m.percent) {
+      // Skip if already fired or fired this tick
+      if (m.fired || messagesFiredThisTick.has(i)) continue;
+      if (pct <= m.percent) {
         // Cooldown: do not fire if fired in last 2s
         if (messageFireTimestamps[i] && now - messageFireTimestamps[i] < 2000) continue;
         messageFireTimestamps[i] = now;
-        // Set fired immediately BEFORE firing to prevent race conditions
+        messagesFiredThisTick.add(i); // Mark as fired this tick
+        // Set fired immediately BEFORE broadcasting to prevent race conditions
         m.fired = true;
-        // Sync fired state to other windows to prevent duplicates
+        // Broadcast BEFORE notification to minimize race condition window
         if (bc && !suppressBroadcast) {
           try {
             bc.postMessage({
@@ -811,8 +927,11 @@
             });
           } catch {}
         }
+        // Use queueMicrotask to ensure broadcast propagates before notification
+        queueMicrotask(() => {
         notifyDesktop("Timer message", m.text);
         playMessageSound(m.sound, m.custom);
+        });
       }
     }
   }
@@ -926,11 +1045,14 @@
   let overlayPopupOnEnd = $state(false); // user option for popup on timer end
   let overlayMode = $state("normal"); // "normal" | "progressbar" | ...
   let overlayProgressBarColor = $state("#8ef59b");
+  let overlayProgressBarFinishedColor = $state("#ff0000"); // Color when timer ends
   let overlayProgressBarType = $state("full");
+  let appBackgroundImage = $state<string | null>(null);
+  let overlayBackgroundImage = $state<string | null>(null);
   function persistOverlaySettings() {
     try {
-      localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd, overlayMode, overlayProgressBarColor, overlayProgressBarType }));
-      if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop, overlayMode: overlayMode, progressBarColor: overlayProgressBarColor, progressBarType: overlayProgressBarType});
+      localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd, overlayMode, overlayProgressBarColor, overlayProgressBarFinishedColor, overlayProgressBarType }));
+      if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop, overlayMode: overlayMode, progressBarColor: overlayProgressBarColor, progressBarFinishedColor: overlayProgressBarFinishedColor, progressBarType: overlayProgressBarType});
     } catch {}
   }
   function loadOverlaySettings() {
@@ -942,6 +1064,7 @@
         if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
         if (typeof v.overlayMode === 'string') overlayMode = v.overlayMode;
         if (typeof v.overlayProgressBarColor === 'string') overlayProgressBarColor = v.overlayProgressBarColor;
+        if (typeof v.overlayProgressBarFinishedColor === 'string') overlayProgressBarFinishedColor = v.overlayProgressBarFinishedColor;
         if (typeof v.overlayProgressBarType === 'string') overlayProgressBarType = v.overlayProgressBarType;
       }
     } catch {}
@@ -968,6 +1091,8 @@
         zoneNotifyMode,
         overlayAlwaysOnTop,
         overlayPopupOnEnd,
+        appBackgroundImage,
+        overlayBackgroundImage,
       };
       localStorage.setItem('appSettings', JSON.stringify(state));
     } catch {}
@@ -987,13 +1112,21 @@
         if (Array.isArray(v.userMessages)) userMessages = v.userMessages;
         if (typeof v.askOnEnd === 'boolean') askOnEnd = v.askOnEnd;
         if (typeof v.endQuestionText === 'string') endQuestionText = v.endQuestionText;
-        if (Array.isArray(v.presets)) presets = v.presets;
+        if (Array.isArray(v.presets)) {
+          presets = v.presets;
+          // In dev mode, ensure 5-second preset is included
+          if (isDev && !presets.includes(5)) {
+            presets = [5, ...presets].sort((a, b) => a - b);
+          }
+        }
         if (typeof v.dangerColor === 'string') dangerColor = v.dangerColor;
         if (typeof v.criticalColor === 'string') criticalColor = v.criticalColor;
         if (typeof v.zoneSoundMode === 'string') zoneSoundMode = v.zoneSoundMode;
         if (typeof v.zoneNotifyMode === 'string') zoneNotifyMode = v.zoneNotifyMode;
         if (typeof v.overlayAlwaysOnTop === 'boolean') overlayAlwaysOnTop = v.overlayAlwaysOnTop;
         if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
+        if (typeof v.appBackgroundImage === 'string') appBackgroundImage = v.appBackgroundImage;
+        if (typeof v.overlayBackgroundImage === 'string') overlayBackgroundImage = v.overlayBackgroundImage;
       }
     } catch { }
   }
@@ -1094,10 +1227,13 @@
             snd: dangerSound,
             csnd: criticalSound,
             colors: { dangerColor, criticalColor },
-            messages: userMessages.map(({ percent, text }) => ({
+            messages: userMessages.map(({ percent, text, fired }) => ({
               percent,
               text,
+              fired,
             })),
+            askOnEnd,
+            endQuestionText,
           });
         } else if (data.type === "close") {
           overlayOpen = false;
@@ -1159,6 +1295,25 @@
             if (remainingSeconds === 0) {
               stopDangerSound();
               stopCriticalSound();
+              // Popup overlay when timer ends (if enabled) - sync from overlay case
+              const isTauriSync = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+              if (overlayPopupOnEnd && isTauriSync) {
+                (async () => {
+                  try {
+                    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                    const overlay = await WebviewWindow.getByLabel("overlay");
+                    if (overlay) {
+                      try { await overlay.unminimize?.(); } catch {}
+                      try { await overlay.setVisibleOnAllWorkspaces?.(true); } catch {}
+                      try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop || true); } catch {}
+                      try { await overlay.show(); } catch {}
+                      try { await overlay.setFocus(); } catch {}
+                    }
+                  } catch (e) {
+                    console.error("Failed to popup overlay on timer end (sync):", e);
+                  }
+                })();
+              }
               if (!suppressBroadcast) broadcast({ type: "end" });
               handleTimerEnd();
               stop();
@@ -1210,11 +1365,71 @@
   }
 </script>
 
-<main class="max-w-[640px] mx-auto px-4 py-8 flex flex-col gap-4">
-  <h1 class="text-4xl font-bold">Timer</h1>
+<main class="max-w-[850px] mx-auto px-4 py-8 flex flex-col gap-4 min-h-screen" style={appBackgroundImage ? `background-image: url(${appBackgroundImage}); background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed;` : ''}>
+  <!-- Branding -->
+  <div class="flex justify-between items-center mb-2">
+    <div class="text-sm [color:var(--color-muted)]">
+      <span class="font-semibold">Timer Gamified</span>
+      <span class="ml-2 text-xs">Beta v0.1.0</span>
+    </div>
+  </div>
+  {#if !isLicensed || licenseModalOpen}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <Modal open={licenseModalOpen} onclose={() => { if (isLicensed) { licenseModalOpen = false; } }}>
+        <div class="p-6 flex flex-col gap-4">
+          <h2 class="text-2xl font-bold [color:var(--color-foreground)]">License Activation Required</h2>
+          <p class="[color:var(--color-muted)]">
+            Timer Gamified Beta requires a valid license key to use. Please enter your license key to continue.
+          </p>
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold [color:var(--color-foreground)]" for="license-input">License Key</label>
+            <Input
+              id="license-input"
+              type="text"
+              bind:value={licenseKeyInput}
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+              class="uppercase"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') activateLicense();
+              }}
+              autofocus={true}
+            />
+            {#if licenseError}
+              <p class="text-sm text-red-500">{licenseError}</p>
+            {/if}
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              class="px-4 py-2 rounded-lg border [border-color:var(--color-card-border)] [background-color:var(--color-card)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+              onclick={() => {
+                licenseKeyInput = "";
+                licenseError = "";
+                if (isLicensed) licenseModalOpen = false;
+              }}
+            >
+              {isLicensed ? 'Cancel' : 'Clear'}
+            </button>
+            <button
+              class="px-4 py-2 rounded-lg border [border-color:var(--color-primary)] [background-color:var(--color-primary)] text-white hover:opacity-90 transition-opacity"
+              onclick={activateLicense}
+            >
+              Activate
+            </button>
+          </div>
+          <div class="text-xs [color:var(--color-muted)] mt-2">
+            <p>License key format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX</p>
+            <p class="mt-1">License is validated and stored securely by the backend.</p>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  {/if}
+
+  <h1 class="text-4xl font-bold game-font">Timer</h1>
 
   <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
-    {#each presets as p, i}
+    {#each presets.filter(p => isDev || p !== 5) as p}
+      {@const originalIndex = presets.indexOf(p)}
       <div class="relative p-2 rounded-xl shadow-[0_8px_20px_rgba(0,0,0,0.35)] [background-color:var(--color-card)] border border-[var(--color-card-border)] group theme-light:shadow-[0_8px_32px_rgba(120,120,140,0.13)]">
         <button
           class="w-full p-4 text-left bg-transparent [color:var(--color-foreground)] relative z-[1] rounded-xl border border-[var(--color-card-border)] {selectedSeconds === p ? '![border-color:var(--color-primary)]' : ''}"
@@ -1233,7 +1448,7 @@
           <button
             class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:[color:var(--color-foreground)]"
             title="Edit"
-            onclick={() => openEdit(i)}
+            onclick={() => openEdit(originalIndex)}
             aria-label="Edit preset"
           >
             <svg
@@ -1256,7 +1471,7 @@
           <button
             class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
             title="Remove"
-            onclick={() => removePresetAt(i)}
+            onclick={() => removePresetAt(originalIndex)}
             aria-label="Remove preset">×</button
           >
         </div>
@@ -1277,13 +1492,31 @@
     </div>
   </div>
 
-  <div class="text-6xl text-center tracking-wider font-['Play',Inter,ui-sans-serif,system-ui,sans-serif]">{formatTime(remainingSeconds)}</div>
+  <div class="text-6xl text-center tracking-wider game-font {!isLicensed ? 'opacity-50 pointer-events-none' : ''}">{formatTime(remainingSeconds)}</div>
   {#if showEndQuestion && askOnEnd}
-    <div class="flex flex-col items-center gap-2 mt-2">
-      <div class="font-semibold">{endQuestionText}</div>
-      <div class="flex gap-3">
-        <button class="w-9 h-9 rounded-lg border [border-color:var(--color-card-border)] text-white bg-[rgba(0,255,128,0.20)]" onclick={() => answerEnd(true)} title="Yes">✓</button>
-        <button class="w-9 h-9 rounded-lg border [border-color:var(--color-card-border)] text-white bg-[rgba(255,64,64,0.20)]" onclick={() => answerEnd(false)} title="No">✖</button>
+    <div class="flex flex-col items-center gap-4 mt-4">
+      <div class="text-lg font-semibold [color:var(--color-foreground)] text-center px-4">{endQuestionText}</div>
+      <div class="flex gap-4 justify-center items-center">
+        <button 
+          class="w-14 h-14 rounded-xl border-2 border-[rgba(0,255,128,0.6)] bg-[rgba(0,255,128,0.2)] hover:bg-[rgba(0,255,128,0.3)] hover:border-[rgba(0,255,128,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(0,255,128,0.3)] group" 
+          onclick={() => answerEnd(true)} 
+          title="Yes"
+          aria-label="Yes"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+            <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
+          </svg>
+        </button>
+        <button 
+          class="w-14 h-14 rounded-xl border-2 border-[rgba(255,64,64,0.6)] bg-[rgba(255,64,64,0.2)] hover:bg-[rgba(255,64,64,0.3)] hover:border-[rgba(255,64,64,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(255,64,64,0.3)] group" 
+          onclick={() => answerEnd(false)} 
+          title="No"
+          aria-label="No"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+            <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
+          </svg>
+        </button>
       </div>
     </div>
   {/if}
@@ -1291,16 +1524,16 @@
 
   <section class="mt-3 overflow-x-auto">
     {#key heatmapKey}
-    <div class="grid grid-cols-[20px_repeat(60,8px)] grid-rows-[14px_repeat(7,8px)] gap-[2px] items-center mt-3 min-w-0">
+    <div class="grid grid-cols-[16px_repeat(60,5px)] grid-rows-[12px_repeat(7,5px)] gap-[1px] items-center mt-3 w-fit max-w-full mx-auto">
       {#each buildMonthLabels(buildYearWeeks()) as ml}
-        <div class="row-start-1 text-[9px] [color:var(--color-muted)]" style={`grid-column:${ml.col};`}>{ml.text}</div>
+        <div class="row-start-1 text-[8px] [color:var(--color-muted)] leading-none" style={`grid-column:${ml.col};`}>{ml.text}</div>
       {/each}
       {#each weekDays as w, j}
-        <div class="col-start-1 text-[9px] [color:var(--color-muted)] justify-self-end" style={`grid-row:${j+2};`}>{w}</div>
+        <div class="col-start-1 text-[8px] [color:var(--color-muted)] justify-self-end leading-none" style={`grid-row:${j+2};`}>{w}</div>
       {/each}
       {#each buildYearWeeks() as wk, i}
         {#each wk as day, j}
-          <div class={`w-2 h-2 rounded-[1px] grid place-items-center ${day.key === sameDayKey(new Date()) ? '[outline:1px_solid_var(--color-primary)] outline-offset-0.5' : ''}`} style={`grid-column:${i+2}; grid-row:${j+2}; background:${colorFor(day.wins, day.losses)};`}
+          <div class={`w-1.5 h-1.5 rounded-[0.5px] grid place-items-center ${day.key === sameDayKey(new Date()) ? '[outline:0.5px_solid_var(--color-primary)] outline-offset-0.5' : ''}`} style={`grid-column:${i+2}; grid-row:${j+2}; background:${colorFor(day.wins, day.losses)};`}
                title={tooltipFor(day.key)}></div>
         {/each}
       {/each}
@@ -1308,14 +1541,14 @@
     {/key}
   </section>
 
-  <div class="flex gap-3 flex-wrap p-2 rounded-lg">
+  <div class="flex gap-3 flex-wrap p-2 rounded-lg {!isLicensed ? 'opacity-50 pointer-events-none' : ''}">
     {#if !isRunning}
-      <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={start}>▶ Start</button>
+      <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={start} disabled={!isLicensed}>▶ Start</button>
     {:else}
-      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-[#1b1b1b] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={stop}>Pause</button>
+      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-[#1b1b1b] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={stop} disabled={!isLicensed}>Pause</button>
     {/if}
     {#if !isFreshStart()}
-      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={reset}>Reset</button>
+      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={reset} disabled={!isLicensed}>Reset</button>
     {/if}
     <button
       class="rounded-[10px] border px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer {overlayOpen ? 'overlay-active' : '[border-color:var(--color-card-border)]'}"
@@ -1351,6 +1584,41 @@
       >{allMuted ? '🔕' : '🔔'}
       <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">{allMuted ? "Unmute all notifications" : "Mute all notifications"}</span>
     </button>
+    <div class="relative">
+      <button
+        class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-sm leading-none relative group h-[38px] flex items-center justify-center {helpMenuOpen ? '![border-color:var(--color-primary)]' : ''}"
+        data-tip="Help"
+        onclick={(e) => {
+          e.stopPropagation();
+          helpMenuOpen = !helpMenuOpen;
+        }}
+        aria-label="Help"
+      >
+        Help
+        <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Help</span>
+      </button>
+      {#if helpMenuOpen}
+        <div 
+          class="absolute right-0 top-full mt-1 w-56 rounded-lg border [border-color:var(--color-card-border)] [background-color:var(--color-card)] shadow-lg z-50 py-1"
+          onclick={(e) => e.stopPropagation()}
+        >
+          <button
+            class="w-full text-left px-4 py-2 text-sm [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+            onclick={openChangeLicense}
+          >
+            Change License Key
+          </button>
+          {#if isLicensed}
+            <button
+              class="w-full text-left px-4 py-2 text-sm text-red-500 hover:text-red-600 hover:[background-color:var(--color-card-border)] transition-colors"
+              onclick={removeLicense}
+            >
+              Remove License Key
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </div>
 
   <Modal
@@ -1362,27 +1630,27 @@
     <div class="grid gap-3">
       <label class="flex gap-3 items-center">
         <span class="[color:var(--color-muted)] w-[90px]">Hours</span>
-        <select bind:value={editHours} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+        <Select bind:value={editHours} class="p-2">
           {#each Array.from({ length: 13 }, (_, n) => n) as h}
             <option value={h}>{h}</option>
           {/each}
-        </select>
+        </Select>
       </label>
       <label class="flex gap-3 items-center">
         <span class="[color:var(--color-muted)] w-[90px]">Minutes</span>
-        <select bind:value={editMinutes} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+        <Select bind:value={editMinutes} class="p-2">
           {#each Array.from({ length: 60 }, (_, n) => n) as m}
             <option value={m}>{m}</option>
           {/each}
-        </select>
+        </Select>
       </label>
       <label class="flex gap-3 items-center">
         <span class="[color:var(--color-muted)] w-[90px]">Seconds</span>
-        <select bind:value={editSeconds} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+        <Select bind:value={editSeconds} class="p-2">
           {#each Array.from({ length: 60 }, (_, n) => n) as s}
             <option value={s}>{s}</option>
           {/each}
-        </select>
+        </Select>
       </label>
     </div>
     <div class="flex gap-2 justify-end mt-3">
@@ -1406,12 +1674,12 @@
       <div class="grid gap-3">
         <label class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Critical threshold (%)</span>
-          <input type="range" min="0" max="99" bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
+          <Input type="range" min={0} max={99} bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
           <span>{criticalPercent}%</span>
         </label>
         <label class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Danger threshold (%)</span>
-          <input type="range" min="0" max="99" bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
+          <Input type="range" min={0} max={99} bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
           <span>{dangerPercent}%</span>
         </label>
         <div class="[color:var(--color-muted)] text-xs">
@@ -1421,25 +1689,25 @@
         <div class="mt-3 font-semibold">Messages (trigger when remaining ≤ %)</div>
         {#each userMessages as msg, idx}
           <div class="flex gap-2 items-center">
-            <input
+            <Input
               type="number"
-              min="1"
-              max="99"
+              min={1}
+              max={99}
               bind:value={msg.percent}
-              class="w-20 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2"
+              class="w-20 p-2"
             />
-            <input
+            <Input
               type="text"
               bind:value={msg.text}
               placeholder="Message to show"
-              class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2"
+              class="flex-1 p-2"
             />
-            <select bind:value={msg.sound} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+            <Select bind:value={msg.sound} class="p-2">
               <option value="beep">Beep</option>
               <option value="heartbeat">Heartbeat</option>
               <option value="none">None</option>
               <option value="custom">Custom</option>
-            </select>
+            </Select>
             {#if msg.sound === "custom"}
               <input
                 type="file"
@@ -1468,68 +1736,150 @@
         </div>
 
         <div class="mt-3 font-semibold">End question</div>
-        <label class="flex gap-2">
-          <input type="checkbox" bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} />
-          <span class="[color:var(--color-muted)]">Ask when timer ends</span>
-        </label>
+        <Checkbox bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} label="Ask when timer ends" />
         <label class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Question text</span>
-          <input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2" />
+          <Input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 p-2" />
         </label>
 
         <div class="mt-3 font-semibold">Zone colors</div>
         <div class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Danger color</span>
-          <input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
+          <Input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
         </div>
         <div class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Critical color</span>
-          <input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
+          <Input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
         </div>
         <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">When to play zone sound</span>
-          <select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+          <Select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
             <option value="none">Never</option>
             <option value="danger">In Danger only</option>
             <option value="critical">In Critical only</option>
             <option value="all">Any phase change</option>
-          </select>
+          </Select>
         </label>
         <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Show notification when entering zone</span>
-          <select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+          <Select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 p-2">
             <option value="none">Never</option>
             <option value="danger">In Danger only</option>
             <option value="critical">In Critical only</option>
             <option value="all">Any phase change</option>
-          </select>
+          </Select>
         </label>
-        <label class="flex gap-2"><input type="checkbox" bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Overlay always stays on top</label>
-        <label class="flex gap-2"><input type="checkbox" bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Bring overlay to top when timer ends</label>
+        <Checkbox bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Overlay always stays on top" />
+        <Checkbox bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} label="Bring overlay to top when timer ends" />
         
         <div class="mt-3 font-semibold">Overlay Mode</div>
         <label class="flex gap-3 items-center">
           <span class="[color:var(--color-muted)] w-[180px]">Mode</span>
-          <select bind:value={overlayMode} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+          <Select bind:value={overlayMode} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
             <option value="normal">Normal</option>
             <option value="progressbar">Progress Bar</option>
-          </select>
+          </Select>
         </label>
         {#if overlayMode === "progressbar"}
           <label class="flex gap-3 items-center">
             <span class="[color:var(--color-muted)] w-[180px]">Progress bar color</span>
-            <input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
+            <Input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
+          </label>
+          <label class="flex gap-3 items-center">
+            <span class="[color:var(--color-muted)] w-[180px]">Progress bar finished color</span>
+            <Input type="color" bind:value={overlayProgressBarFinishedColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
           </label>
           <label class="flex gap-3 items-center">
             <span class="[color:var(--color-muted)] w-[180px]">Progress bar type</span>
-            <select bind:value={overlayProgressBarType} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+            <Select bind:value={overlayProgressBarType} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 p-2">
               <option value="full">Full</option>
-            </select>
+            </Select>
           </label>
         {/if}
         <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Color Theme</span>
-          <select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+          <Select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 p-2">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
-          </select>
+          </Select>
+        </label>
+
+        <div class="mt-3 font-semibold">Background Images</div>
+        <label class="flex flex-col gap-2">
+          <span class="[color:var(--color-muted)] text-sm">App Background</span>
+          <div class="flex gap-2 items-center">
+            <input
+              type="file"
+              accept="image/*"
+              class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
+              onchange={async (e) => {
+                const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    appBackgroundImage = reader.result as string;
+                    saveAppSettings();
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }}
+            />
+            {#if appBackgroundImage}
+              <button
+                class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+                onclick={() => {
+                  appBackgroundImage = null;
+                  saveAppSettings();
+                }}
+              >
+                Remove
+              </button>
+            {/if}
+      </div>
+        </label>
+        <label class="flex flex-col gap-2">
+          <span class="[color:var(--color-muted)] text-sm">Overlay Background</span>
+          <div class="flex gap-2 items-center">
+            <input
+              type="file"
+              accept="image/*"
+              class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
+              onchange={async (e) => {
+                const file = (e.currentTarget as HTMLInputElement).files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    overlayBackgroundImage = reader.result as string;
+                    saveAppSettings();
+                    // Broadcast to overlay
+                    if (bc) {
+                      bc.postMessage({
+                        source: 'main',
+                        type: 'overlay_background',
+                        backgroundImage: overlayBackgroundImage
+                      });
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }}
+            />
+            {#if overlayBackgroundImage}
+              <button
+                class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
+                onclick={() => {
+                  overlayBackgroundImage = null;
+                  saveAppSettings();
+                  if (bc) {
+                    bc.postMessage({
+                      source: 'main',
+                      type: 'overlay_background',
+                      backgroundImage: null
+                    });
+                  }
+                }}
+              >
+                Remove
+              </button>
+            {/if}
+          </div>
         </label>
       </div>
       <div class="flex justify-end gap-2 mt-3">
