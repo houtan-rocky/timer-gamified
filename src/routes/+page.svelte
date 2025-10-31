@@ -1098,7 +1098,7 @@
                 const overlay = await WebviewWindow.getByLabel("overlay");
                 if (overlay) {
                   await overlay.unminimize?.();
-                  await overlay.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true });
+                  await overlay.setVisibleOnAllWorkspaces?.(true);
                   await overlay.show();
                   await overlay.setAlwaysOnTop(true); // force top if option enabled
                   await overlay.setFocus();
@@ -1174,7 +1174,7 @@
                 const overlay = await WebviewWindow.getByLabel("overlay");
                 if (overlay) {
                   await overlay.unminimize?.();
-                  await overlay.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true });
+                  await overlay.setVisibleOnAllWorkspaces?.(true);
                   await overlay.show();
                   await overlay.setAlwaysOnTop(true); // force top if option enabled
                   await overlay.setFocus();
@@ -1306,7 +1306,7 @@
       >{overlayOpen ? "Overlay mode (on)" : "Overlay mode"}</button
     >
     <button
-      class="icon gear tooltip"
+      class="icon gear {settingsOpen ? 'active' : ''} tooltip"
       data-tip="Settings"
       onclick={() => {
         requestNotifyPermission();
@@ -1596,7 +1596,14 @@
     padding: 6px 10px;
   cursor: pointer;
 }
-  .icon.chat.on {
+  .icon.gear {
+    color: #ffffff;
+  }
+  :global(.theme-light) .icon.gear {
+    color: #1a1a1a;
+  }
+  .icon.chat.on,
+  .icon.gear.active {
     border-color: var(--primary);
   }
   .action {
@@ -1620,9 +1627,10 @@
   .action.ghost {
     background: transparent;
   }
-  .action.active {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent);
+  button.action.ghost.active {
+    background: rgba(115, 212, 128, 0.15);
+    border: 1px solid var(--primary);
+    box-shadow: 0 0 0 2px rgba(115, 212, 128, 0.35);
   }
   .icon.gear {
     font-size: 20px;
