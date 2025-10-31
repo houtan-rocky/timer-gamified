@@ -400,9 +400,11 @@
               return;
             }
           }
+          // Notify main window that overlay is closing
           try {
             bc?.postMessage({ source: "overlay", type: "close" });
           } catch {}
+          // Allow the close to proceed (don't prevent default)
         });
         
         await current.setAlwaysOnTop(!!overlayAlwaysOnTop);
@@ -457,6 +459,10 @@
 
     if ("BroadcastChannel" in window) {
       bc = new BroadcastChannel("timer-sync");
+      // Notify main window that overlay is open
+      try {
+        bc.postMessage({ source: "overlay", type: "overlay_opened" });
+      } catch {}
       bc.onmessage = (e) => {
         (async () => {
           const data = e.data || {};
@@ -715,82 +721,170 @@
       <div class="absolute left-0 top-0 bottom-0 transition-[width] duration-200 ease-linear opacity-80" style={`width: ${progressPercent()}%; background-color: ${remainingSeconds === 0 ? progressBarFinishedColor : progressBarColor};`}></div>
     </div>
   {/if}
-  <div class="absolute top-1.5 left-2 right-2 z-10 flex justify-between text-xs opacity-90 [-webkit-app-region:no-drag]">
-    <div>{now.toLocaleDateString()}</div>
-    <div>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+  <!-- Header with date/time and zone indicator -->
+  <div class="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-2 bg-gradient-to-b from-black/40 via-black/20 to-transparent [-webkit-app-region:no-drag]">
+    <div class="flex items-center gap-2">
+      <div class="text-[10px] font-medium [color:var(--color-muted)] uppercase tracking-wider">{now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+      <div class="text-[10px] [color:var(--color-muted)]">{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+    </div>
+    {#if overlayMode !== 'progressbar' && isRunning && !hasEnded}
+      {@const zone = zoneFromPercent(currentPercent())}
+      <div class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider game-font
+        {zone === 'OK' ? 'bg-[rgba(142,245,155,0.2)] border border-[rgba(142,245,155,0.4)] [color:rgba(142,245,155,0.9)] [text-shadow:0_0_8px_rgba(142,245,155,0.5)]' : ''}
+        {zone === 'DANGER' ? `bg-[color-mix(in_srgb,var(--danger)_20%,transparent)] border border-[color-mix(in_srgb,var(--danger)_50%,transparent)] [color:var(--danger)] [text-shadow:0_0_10px_color-mix(in_srgb,var(--danger)_60%,transparent)] animate-[glow_1.25s_ease-in-out_infinite]` : ''}
+        {zone === 'CRITICAL' ? `bg-[color-mix(in_srgb,var(--critical)_25%,transparent)] border border-[color-mix(in_srgb,var(--critical)_60%,transparent)] [color:var(--critical)] [text-shadow:0_0_12px_color-mix(in_srgb,var(--critical)_70%,transparent)] animate-[glow_0.75s_ease-in-out_infinite]` : ''}
+        {!isRunning ? 'bg-[rgba(142,245,155,0.15)] border border-[rgba(142,245,155,0.3)] [color:rgba(142,245,155,0.8)]' : ''}
+      ">
+        {zone}
+      </div>
+    {/if}
   </div>
-  <div class="relative z-10 flex flex-col items-center justify-center flex-1 w-full">
+
+  <!-- Main content area -->
+  <div class="relative z-10 flex flex-col items-center justify-center flex-1 w-full pt-8 pb-4">
   {#if hasEnded && askOnEnd && !resultRecorded}
-    <div class="flex flex-col items-center gap-4 [-webkit-app-region:no-drag]">
-      <div class="text-xl font-semibold [color:var(--color-foreground)] text-center px-4">{endQuestionText}</div>
-      <div class="flex gap-4 justify-center items-center">
+    <div class="flex flex-col items-center gap-6 [-webkit-app-region:no-drag] animate-[slideIn_0.3s_ease-out]">
+      <div class="text-2xl font-bold game-font [color:var(--color-foreground)] text-center px-6 tracking-wide">{endQuestionText}</div>
+      <div class="flex gap-5 justify-center items-center">
         <button
-          class="w-16 h-16 rounded-xl border-2 border-[rgba(0,255,128,0.6)] bg-[rgba(0,255,128,0.2)] hover:bg-[rgba(0,255,128,0.3)] hover:border-[rgba(0,255,128,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(0,255,128,0.3)] [-webkit-app-region:no-drag] group"
+          class="relative w-20 h-20 rounded-2xl border-2 border-[rgba(142,245,155,0.7)] bg-gradient-to-br from-[rgba(142,245,155,0.25)] to-[rgba(142,245,155,0.15)] hover:from-[rgba(142,245,155,0.35)] hover:to-[rgba(142,245,155,0.25)] hover:border-[rgba(142,245,155,0.9)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_6px_20px_rgba(142,245,155,0.4)] [-webkit-app-region:no-drag] group overflow-hidden"
           onclick={() => recordResult(true)}
           title="Yes"
           aria-label="Yes"
         >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+          <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
             <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
           </svg>
         </button>
         <button
-          class="w-16 h-16 rounded-xl border-2 border-[rgba(255,64,64,0.6)] bg-[rgba(255,64,64,0.2)] hover:bg-[rgba(255,64,64,0.3)] hover:border-[rgba(255,64,64,0.8)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_4px_12px_rgba(255,64,64,0.3)] [-webkit-app-region:no-drag] group"
+          class="relative w-20 h-20 rounded-2xl border-2 border-[rgba(255,68,68,0.7)] bg-gradient-to-br from-[rgba(255,68,68,0.25)] to-[rgba(255,68,68,0.15)] hover:from-[rgba(255,68,68,0.35)] hover:to-[rgba(255,68,68,0.25)] hover:border-[rgba(255,68,68,0.9)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_6px_20px_rgba(255,68,68,0.4)] [-webkit-app-region:no-drag] group overflow-hidden"
           onclick={() => recordResult(false)}
           title="No"
           aria-label="No"
         >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform">
+          <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
             <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
           </svg>
         </button>
       </div>
     </div>
   {:else}
-    <div
-      class="text-4xl tracking-wider game-font text-center w-full px-4 animate-[pulse_2s_ease-in-out_infinite] cursor-pointer {remainingSeconds === 0 ? 'animate-none' : ''} {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()) === 'DANGER' ? '[animation-duration:1.25s] [color:var(--danger)] [text-shadow:0_0_12px_color-mix(in_srgb,var(--danger)_50%,transparent)]' : zoneFromPercent(currentPercent()) === 'CRITICAL' ? '[animation-duration:0.75s] [color:var(--critical)] [text-shadow:0_0_14px_color-mix(in_srgb,var(--critical)_55%,transparent)]' : '') : ''} theme-light:[color:#17191b] theme-light:[text-shadow:none] [-webkit-app-region:no-drag]"
-      role="button"
-      tabindex="0"
-      onclick={openTimeEditor}
-      onkeydown={(e) => {
-        if (e.key === "Enter" || e.key === " ") openTimeEditor();
-      }}
-      title="Click to edit time"
-    >
-      {#if editingTime}
-        <div class="flex flex-col items-center gap-1">
-          <Input
-            type="text"
-            class="w-[86px] text-center text-base rounded-[7px] border border-[#8884] p-0.5"
-            bind:value={editTimeStr}
-            bind:editInputEl={editInputEl}
-            autofocus={true}
-            onblur={saveTimeEdit}
-            onkeydown={(e) => {
-              if (e.key === "Enter") saveTimeEdit();
-              else if (e.key === "Escape") cancelTimeEdit();
-            }}
-          />
-          {#if editError}
-            <div class="text-[11px] text-[#ff5a5a]">{editError}</div>
-          {/if}
+    <!-- Timer display with enhanced styling -->
+    <div class="relative flex flex-col items-center gap-3">
+      <!-- Timer with glow effect and zone styling -->
+      <div
+        class="relative text-5xl font-bold game-font tracking-[0.1em] cursor-pointer transition-all duration-300 [-webkit-app-region:no-drag]
+        {remainingSeconds === 0 ? 'animate-none opacity-90' : 'animate-[pulse_2s_ease-in-out_infinite]'} 
+        {overlayMode !== 'progressbar' ? (
+          zoneFromPercent(currentPercent()) === 'DANGER' 
+            ? '[animation-duration:1.25s] [color:var(--danger)] [text-shadow:0_0_20px_color-mix(in_srgb,var(--danger)_70%,transparent),0_0_40px_color-mix(in_srgb,var(--danger)_40%,transparent)] drop-shadow-[0_4px_12px_color-mix(in_srgb,var(--danger)_50%,transparent)]' 
+            : zoneFromPercent(currentPercent()) === 'CRITICAL' 
+              ? '[animation-duration:0.75s] [color:var(--critical)] [text-shadow:0_0_24px_color-mix(in_srgb,var(--critical)_75%,transparent),0_0_50px_color-mix(in_srgb,var(--critical)_45%,transparent)] drop-shadow-[0_6px_16px_color-mix(in_srgb,var(--critical)_60%,transparent)]' 
+              : '[color:var(--color-primary)] [text-shadow:0_0_16px_color-mix(in_srgb,var(--color-primary)_60%,transparent)] drop-shadow-[0_2px_8px_color-mix(in_srgb,var(--color-primary)_40%,transparent)]'
+        ) : '[color:var(--color-foreground)]'} 
+        theme-light:[color:#17191b] theme-light:[text-shadow:none] theme-light:drop-shadow-[0_2px_4px_rgba(0,0,0,0.1)]"
+        role="button"
+        tabindex="0"
+        onclick={openTimeEditor}
+        onkeydown={(e) => {
+          if (e.key === "Enter" || e.key === " ") openTimeEditor();
+        }}
+        title="Click to edit time"
+      >
+        {#if editingTime}
+          <div class="flex flex-col items-center gap-2">
+            <Input
+              type="text"
+              class="w-[120px] text-center text-xl rounded-xl border-2 border-[rgba(142,245,155,0.5)] bg-[rgba(20,20,20,0.8)] [color:var(--color-foreground)] p-2 game-font focus:border-[rgba(142,245,155,0.8)] focus:outline-none focus:ring-2 focus:ring-[rgba(142,245,155,0.3)]"
+              bind:value={editTimeStr}
+              bind:editInputEl={editInputEl}
+              autofocus={true}
+              onblur={saveTimeEdit}
+              onkeydown={(e) => {
+                if (e.key === "Enter") saveTimeEdit();
+                else if (e.key === "Escape") cancelTimeEdit();
+              }}
+            />
+            {#if editError}
+              <div class="text-xs text-[#ff5a5a] font-medium animate-[slideIn_0.2s_ease-out]">{editError}</div>
+            {/if}
+          </div>
+        {:else}
+          <div class="relative">
+            <!-- Timer digits with enhanced styling -->
+            <span class="inline-block">{formatTime(remainingSeconds)}</span>
+            {#if isRunning && remainingSeconds > 0 && remainingSeconds <= 10}
+              <span class="absolute inset-0 animate-[countdown-tick_1s_ease-in-out_infinite] opacity-50"></span>
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Progress indicator bar (when not in progressbar mode) -->
+      {#if overlayMode !== 'progressbar' && isRunning}
+        <div class="w-32 h-1 bg-[rgba(255,255,255,0.1)] rounded-full overflow-hidden [-webkit-app-region:no-drag]">
+          <div 
+            class="h-full transition-all duration-300 ease-linear rounded-full
+            {zoneFromPercent(currentPercent()) === 'OK' ? 'bg-gradient-to-r from-[var(--color-primary)] to-[color-mix(in_srgb,var(--color-primary)_80%,transparent)]' : ''}
+            {zoneFromPercent(currentPercent()) === 'DANGER' ? `bg-gradient-to-r from-[var(--danger)] to-[color-mix(in_srgb,var(--danger)_80%,transparent)]` : ''}
+            {zoneFromPercent(currentPercent()) === 'CRITICAL' ? `bg-gradient-to-r from-[var(--critical)] to-[color-mix(in_srgb,var(--critical)_80%,transparent)]` : ''}"
+            style={`width: ${100 - currentPercent()}%`}
+          ></div>
         </div>
-      {:else}
-        {formatTime(remainingSeconds)}
       {/if}
     </div>
+
+    <!-- Control buttons with connected bar styling -->
+    <div class="flex [-webkit-app-region:no-drag] justify-center items-center w-full px-4 mt-3">
+      <div class="flex rounded-lg overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.2)] bg-[rgba(20,20,20,0.95)] border border-[rgba(255,255,255,0.12)] backdrop-blur-sm theme-light:bg-[rgba(255,255,255,0.95)] theme-light:border-[rgba(0,0,0,0.12)]">
+        {#if !isRunning && !hasEnded}
+          {#if !hasStarted}
+            <!-- Start button (left, rounded left) -->
+            <button 
+              class="px-4 py-2 rounded-l-lg border-r border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
+              onclick={start}
+            >
+              Start
+            </button>
+          {:else}
+            <!-- Resume button (left, rounded left) -->
+            <button 
+              class="px-4 py-2 rounded-l-lg border-r border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
+              onclick={start}
+            >
+              Resume
+            </button>
+          {/if}
+        {:else if !hasEnded}
+          <!-- Pause button (left, rounded left) -->
+          <button 
+            class="px-4 py-2 rounded-l-lg border-r border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
+            onclick={pause}
+          >
+            Pause
+          </button>
+        {/if}
+        {#if !hasEnded && hasStarted}
+          <!-- Stop button (middle, square) -->
+          <button 
+            class="px-4 py-2 border-x border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
+            onclick={() => { pause(); reset(); }}
+          >
+            Stop
+          </button>
+        {/if}
+        <!-- Restart button (right, rounded right) -->
+        <button 
+          class="px-4 py-2 {!hasEnded && hasStarted ? 'rounded-r-lg border-l' : (!hasStarted && !isRunning ? 'rounded-r-lg border-l' : 'rounded-lg')} border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
+          onclick={() => { reset(); start(); }}
+        >
+          Restart
+        </button>
+      </div>
+    </div>
   {/if}
-  <div class="flex gap-1.5 [-webkit-app-region:no-drag] justify-center w-full px-4 mt-2">
-    {#if !isRunning && !hasEnded}
-      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={start}>Resume</button>
-    {:else if !hasEnded}
-      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={pause}>Pause</button>
-    {/if}
-    {#if !hasEnded && hasStarted}
-      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={() => { pause(); reset(); }}>Stop</button>
-    {/if}
-    <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={() => { reset(); start(); }}>Restart</button>
-  </div>
   </div>
 </main>
 

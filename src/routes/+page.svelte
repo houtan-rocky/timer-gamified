@@ -5,6 +5,7 @@
   import Input from "../lib/components/Input.svelte";
   import Checkbox from "../lib/components/Checkbox.svelte";
   import Select from "../lib/components/Select.svelte";
+  import Icon from "../lib/components/Icon.svelte";
   // Check if we're in dev mode
   const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
   
@@ -43,6 +44,39 @@
   let endSoundCustom: string | undefined = undefined;
   let hasFiredEndSound = false;
   let overlayOpen = $state(false);
+  
+  // Periodically check overlay state to keep it in sync
+  $effect(() => {
+    const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+    if (!isTauri) return;
+    
+    const checkOverlayState = async () => {
+      try {
+        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        const overlay = await WebviewWindow.getByLabel("overlay");
+        if (overlay) {
+          try {
+            const isVisible = await overlay.isVisible();
+            overlayOpen = isVisible;
+          } catch {
+            overlayOpen = false;
+          }
+        } else {
+          overlayOpen = false;
+        }
+      } catch {
+        overlayOpen = false;
+      }
+    };
+    
+    // Check immediately
+    checkOverlayState();
+    
+    // Check periodically (every 2 seconds)
+    const interval = setInterval(checkOverlayState, 2000);
+    
+    return () => clearInterval(interval);
+  });
   // End question settings
   let askOnEnd = $state(true);
   let endQuestionText = $state('Win?');
@@ -581,6 +615,35 @@
   async function openOverlayAndStart() {
     const isTauri =
       typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+    
+    // First, check if overlay exists and sync state
+    if (isTauri) {
+      try {
+        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        const existing = await WebviewWindow.getByLabel("overlay");
+        if (existing) {
+          try {
+            const isVisible = await existing.isVisible();
+            if (isVisible) {
+              // Overlay exists and is visible, close it
+              await existing.close();
+              overlayOpen = false;
+              return;
+            } else {
+              // Overlay exists but not visible, mark as closed
+              overlayOpen = false;
+            }
+          } catch {
+            overlayOpen = false;
+          }
+        } else {
+          overlayOpen = false;
+        }
+      } catch {
+        overlayOpen = false;
+      }
+    }
+    
     const startedAt = isRunning
       ? Date.now() - (selectedSeconds - remainingSeconds) * 1000
       : Date.now();
@@ -624,16 +687,9 @@
       location.href = `/overlay?${params.toString()}`;
       return;
     }
+    // State sync already happened above, so if we get here and overlayOpen is false,
+    // we know the overlay should be closed and we can proceed to create it
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const existing = await WebviewWindow.getByLabel("overlay");
-    if (existing) {
-      // Toggle: close overlay
-      try {
-        await existing.close();
-      } catch {}
-      overlayOpen = false;
-      return;
-    }
     const w = new WebviewWindow("overlay", {
       url: `/overlay?${params.toString()}`,
       title: "Timer Overlay",
@@ -653,21 +709,32 @@
       await new Promise<void>((resolve, reject) => {
         w.once("tauri://created", () => resolve());
         w.once("tauri://error", (e) => reject(e));
+        setTimeout(() => reject(new Error("Timeout")), 5000);
       });
-      await w.setAlwaysOnTop(true);
+      await w.setAlwaysOnTop(overlayAlwaysOnTop);
       await w.setFocus();
       await w.show();
       // @ts-ignore center may not be typed
       await w.center?.();
+      // Set state immediately after window is shown
       overlayOpen = true;
+      // Verify state by checking window visibility
+      try {
+        const isVisible = await w.isVisible();
+        overlayOpen = isVisible;
+      } catch {
+        overlayOpen = true; // Default to true if check fails
+      }
       // Track close to update state
-      w.listen("tauri://destroyed", () => {
+      w.listen("tauri://destroyed", (_e: any) => {
         overlayOpen = false;
       });
+      // Note: close-requested might not fire, so we also listen for destroyed
     } catch (e) {
       console.error("Failed to show overlay window", e);
+      overlayOpen = false;
     }
-  }2
+  }
 
   async function openPictureInPicture(totalSeconds: number) {
     // Create a canvas we can stream into PiP
@@ -1208,12 +1275,39 @@
     })();
     if ("BroadcastChannel" in window) {
       if (!bc) bc = new BroadcastChannel("timer-sync");
-      bc.onmessage = (e) => {
+      bc.onmessage = async (e) => {
         const data = e.data || {};
         if (data.source === "main") return; // ignore our own rebroadcasts
         if (data.source === "overlay") {
           // apply state from overlay without re-broadcasting
           suppressBroadcast = true;
+          // Handle overlay_opened message to immediately set state to true
+          if (data.type === "overlay_opened") {
+            overlayOpen = true;
+          }
+          // Sync overlayOpen state when receiving messages from overlay
+          const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+          if (isTauri) {
+            try {
+              const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+              const overlay = await WebviewWindow.getByLabel("overlay");
+              if (overlay) {
+                try {
+                  const isVisible = await overlay.isVisible();
+                  overlayOpen = isVisible;
+                } catch {
+                  // If overlay exists but we can't check visibility, assume it's open
+                  if (data.type === "overlay_opened") {
+                    overlayOpen = true;
+                  }
+                }
+              } else {
+                overlayOpen = false;
+              }
+            } catch {
+              // Keep current state if check fails
+            }
+          }
         }
         if (data.type === "request_state") {
           broadcast({
@@ -1237,6 +1331,30 @@
           });
         } else if (data.type === "close") {
           overlayOpen = false;
+          // Verify the overlay is actually closed
+          const isTauriCheck = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+          if (isTauriCheck) {
+            (async () => {
+              try {
+                const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                const overlay = await WebviewWindow.getByLabel("overlay");
+                if (overlay) {
+                  try {
+                    const isVisible = await overlay.isVisible();
+                    if (!isVisible) {
+                      overlayOpen = false;
+                    }
+                  } catch {
+                    overlayOpen = false;
+                  }
+                } else {
+                  overlayOpen = false;
+                }
+              } catch {
+                overlayOpen = false;
+              }
+            })();
+          }
         } else if (data.type === 'result') {
           // Overlay recorded a result; persist and update today stats
           const recs = loadRecords();
@@ -1541,52 +1659,68 @@
     {/key}
   </section>
 
-  <div class="flex gap-3 flex-wrap p-2 rounded-lg {!isLicensed ? 'opacity-50 pointer-events-none' : ''}">
+  <div class="flex gap-2 flex-wrap items-center p-2 rounded-lg {!isLicensed ? 'opacity-50 pointer-events-none' : ''}">
     {#if !isRunning}
-      <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={start} disabled={!isLicensed}>▶ Start</button>
+      <button class="h-[38px] flex items-center gap-1.5 rounded-[10px] border border-[#72d480] px-4 font-semibold text-[#05210c] [background-color:var(--color-primary)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={start} disabled={!isLicensed}>
+        <Icon variant="play" size="sm" />
+        <span>{isFreshStart() ? 'Start' : 'Resume'}</span>
+      </button>
     {:else}
-      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-[#1b1b1b] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={stop} disabled={!isLicensed}>Pause</button>
+      <button class="h-[38px] flex items-center gap-1.5 rounded-[10px] border [border-color:var(--color-card-border)] px-4 font-semibold [color:var(--color-foreground)] bg-[#1b1b1b] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={stop} disabled={!isLicensed}>
+        <Icon variant="pause" size="sm" />
+        <span>Pause</span>
+      </button>
     {/if}
     {#if !isFreshStart()}
-      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={reset} disabled={!isLicensed}>Reset</button>
+      <button class="h-[38px] flex items-center gap-1.5 rounded-[10px] border [border-color:var(--color-card-border)] px-4 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={reset} disabled={!isLicensed}>
+        <Icon variant="reset" size="sm" />
+        <span>Reset</span>
+      </button>
     {/if}
     <button
-      class="rounded-[10px] border px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer {overlayOpen ? 'overlay-active' : '[border-color:var(--color-card-border)]'}"
+      class="h-[38px] flex items-center gap-1.5 rounded-[10px] border px-4 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer {overlayOpen ? 'overlay-active' : 'border-[var(--color-card-border)]'}"
       onclick={openOverlayAndStart}
       title="Toggle overlay"
-      >{overlayOpen ? "Overlay mode (on)" : "Overlay mode"}</button
     >
+      <Icon variant="overlay" size="sm" />
+      <span>{overlayOpen ? "Overlay mode (on)" : "Overlay mode"}</span>
+    </button>
     <button
-      class="bg-black/35 text-white border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-xl leading-none relative group {settingsOpen ? '![border-color:var(--color-primary)]' : ''} theme-light:text-[#1a1a1a]"
+      class="h-[38px] w-[38px] flex items-center justify-center bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg cursor-pointer relative group {settingsOpen ? '![border-color:var(--color-primary)]' : ''}"
       data-tip="Settings"
       onclick={() => {
         requestNotifyPermission();
         editOpen = false;
         settingsOpen = true;
       }}
-      aria-label="Settings">⚙
+      aria-label="Settings"
+    >
+      <Icon variant="settings" size="md" />
       <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Settings</span>
     </button>
     <button
-      class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-[10px] leading-none relative group {autoMessagesEnabled ? '![border-color:var(--color-primary)]' : ''}"
+      class="h-[38px] w-[38px] flex items-center justify-center bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg cursor-pointer relative group {autoMessagesEnabled ? '![border-color:var(--color-primary)]' : ''}"
       data-tip="Auto-messages"
       onclick={() => {
         autoMessagesEnabled = !autoMessagesEnabled;
         requestNotifyPermission();
       }}
-      aria-label="Auto messages">💬
+      aria-label="Auto messages"
+    >
+      <Icon variant="message" size="md" />
       <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Auto-messages</span>
     </button>
     <button
-      class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer relative group"
+      class="h-[38px] w-[38px] flex items-center justify-center bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg cursor-pointer relative group"
       aria-label="Toggle mute"
       onclick={() => (allMuted = !allMuted)}
-      >{allMuted ? '🔕' : '🔔'}
+    >
+      <Icon variant={allMuted ? "bell-slash" : "bell"} size="md" />
       <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">{allMuted ? "Unmute all notifications" : "Mute all notifications"}</span>
     </button>
     <div class="relative">
       <button
-        class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-sm leading-none relative group h-[38px] flex items-center justify-center {helpMenuOpen ? '![border-color:var(--color-primary)]' : ''}"
+        class="h-[38px] flex items-center gap-1.5 bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 cursor-pointer text-sm leading-none relative group {helpMenuOpen ? '![border-color:var(--color-primary)]' : ''}"
         data-tip="Help"
         onclick={(e) => {
           e.stopPropagation();
@@ -1594,7 +1728,8 @@
         }}
         aria-label="Help"
       >
-        Help
+        <Icon variant="help" size="sm" />
+        <span>Help</span>
         <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Help</span>
       </button>
       {#if helpMenuOpen}
