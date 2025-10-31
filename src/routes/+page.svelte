@@ -6,6 +6,8 @@
   import Checkbox from "../lib/components/Checkbox.svelte";
   import Select from "../lib/components/Select.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import SoundEditor from "../lib/components/SoundEditor.svelte";
+  import ImageEditor from "../lib/components/ImageEditor.svelte";
   // Check if we're in dev mode
   const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
   
@@ -41,12 +43,15 @@
   let criticalSound: "heartbeat" | "beep" | "none" = $state("none");
   type EndSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
   let endSound: EndSound = $state("triple");
-  let endSoundCustom: string | undefined = undefined;
+  let endSoundCustom = $state<string | undefined>(undefined);
   type CelebrationType = "both" | "confetti" | "sound" | "none";
   let celebrationType = $state<CelebrationType>("both");
-  type SuccessSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
-  let successSound: SuccessSound = $state("triple");
+  type SuccessSound = "battlewin" | "epic" | "triple" | "beep" | "heartbeat" | "none" | "custom";
+  let successSound: SuccessSound = $state("battlewin");
   let successSoundCustom = $state<string | undefined>(undefined);
+  type FailureSound = "yoos" | "sad" | "beep" | "heartbeat" | "none" | "custom";
+  let failureSound: FailureSound = $state("yoos");
+  let failureSoundCustom = $state<string | undefined>(undefined);
   let hasFiredEndSound = false;
   let overlayOpen = $state(false);
   
@@ -496,11 +501,11 @@
                 overlay = w;
                 overlayOpen = true;
               }
-              // Always bring to front when timer ends (if overlay exists)
+              // Bring to front when timer ends (if overlay exists) - respect alwaysOnTop setting
               if (overlay) {
               try { await overlay.unminimize?.(); } catch {}
               try { await overlay.setVisibleOnAllWorkspaces?.(true); } catch {}
-                try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop || true); } catch {}
+                try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop); } catch {}
               try { await overlay.show(); } catch {}
                 try { await overlay.setFocus(); } catch {}
               }
@@ -1056,9 +1061,136 @@
     setTimeout(() => playBeep(120, 1200), 400);
   }
 
+  function playBattleWin() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Epic battle win / archangel fanfare: powerful ascending chords with triumphant ending
+    const notes = [
+      // Opening powerful chord
+      { freq: 392.00, time: 0, dur: 0.25 },     // G4
+      { freq: 493.88, time: 0, dur: 0.25 },     // B4
+      { freq: 587.33, time: 0, dur: 0.25 },     // D5
+      // Ascending progression
+      { freq: 523.25, time: 0.3, dur: 0.2 },    // C5
+      { freq: 659.25, time: 0.3, dur: 0.2 },    // E5
+      { freq: 783.99, time: 0.3, dur: 0.2 },    // G5
+      // Climactic chord
+      { freq: 659.25, time: 0.55, dur: 0.25 },  // E5
+      { freq: 783.99, time: 0.55, dur: 0.25 },  // G5
+      { freq: 987.77, time: 0.55, dur: 0.25 },  // B5
+      // Triumphant high notes
+      { freq: 1046.50, time: 0.85, dur: 0.3 },  // C6
+      { freq: 1318.51, time: 1.15, dur: 0.35 }, // E6
+      { freq: 1567.98, time: 1.5, dur: 0.4 },  // G6 - epic high note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      // Use more harmonic waveform for richer sound
+      osc.type = note.freq > 1000 ? "triangle" : "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.25, audioCtx!.currentTime + note.time + 0.02);
+      gain.gain.linearRampToValueAtTime(0, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
+  function playEpicSuccess() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Epic fanfare: ascending major chord progression with rhythm
+    const notes = [
+      { freq: 523.25, time: 0, dur: 0.15 },      // C5
+      { freq: 659.25, time: 0, dur: 0.15 },      // E5
+      { freq: 783.99, time: 0, dur: 0.15 },      // G5
+      { freq: 659.25, time: 0.2, dur: 0.12 },   // E5
+      { freq: 783.99, time: 0.2, dur: 0.12 },   // G5
+      { freq: 987.77, time: 0.2, dur: 0.12 },   // B5
+      { freq: 1046.50, time: 0.35, dur: 0.25 }, // C6 - climactic note
+      { freq: 1318.51, time: 0.6, dur: 0.3 },    // E6 - high note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.2, audioCtx!.currentTime + note.time + 0.02);
+      gain.gain.linearRampToValueAtTime(0, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
+  function playYoosFailure() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // "Yoo yoo yoo yoo" - descending "whoops" sound
+    const yoos = [
+      { freq: 880, time: 0, dur: 0.12 },      // A5 - "Yoo"
+      { freq: 740, time: 0.15, dur: 0.12 },  // F#5 - "yoo"
+      { freq: 622, time: 0.3, dur: 0.12 },   // D#5 - "yoo"
+      { freq: 523, time: 0.45, dur: 0.15 },  // C5 - "yoo" (final)
+    ];
+    
+    yoos.forEach((yoo, i) => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      // Slide down frequency for "yoo" effect
+      const startFreq = yoo.freq;
+      const endFreq = yoo.freq * 0.7;
+      osc.frequency.setValueAtTime(startFreq, audioCtx!.currentTime + yoo.time);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, audioCtx!.currentTime + yoo.time + yoo.dur);
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + yoo.time);
+      gain.gain.linearRampToValueAtTime(0.18, audioCtx!.currentTime + yoo.time + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx!.currentTime + yoo.time + yoo.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + yoo.time);
+      osc.stop(audioCtx!.currentTime + yoo.time + yoo.dur + 0.02);
+    });
+  }
+
+  function playSadFailure() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Sad descending minor notes
+    const notes = [
+      { freq: 587.33, time: 0, dur: 0.2 },       // D5
+      { freq: 523.25, time: 0.15, dur: 0.2 },   // C5
+      { freq: 466.16, time: 0.3, dur: 0.3 },     // Bb4
+      { freq: 392.00, time: 0.45, dur: 0.4 },    // G4 - final low note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.15, audioCtx!.currentTime + note.time + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
   const successAudioCache: Record<string, HTMLAudioElement> = {};
   function playSuccessSound() {
     if (successSound === "none") return;
+    if (successSound === "battlewin") return playBattleWin();
+    if (successSound === "epic") return playEpicSuccess();
     if (successSound === "triple") return playTripleBeep();
     if (successSound === "beep") return playBeep(300, 1500);
     if (successSound === "heartbeat") return playHeartbeat();
@@ -1067,6 +1199,26 @@
       if (!el) {
         el = new Audio(successSoundCustom);
         successAudioCache[successSoundCustom] = el;
+      }
+      try {
+        el.currentTime = 0;
+        el.play();
+      } catch {}
+    }
+  }
+
+  const failureAudioCache: Record<string, HTMLAudioElement> = {};
+  function playFailureSound() {
+    if (failureSound === "none") return;
+    if (failureSound === "yoos") return playYoosFailure();
+    if (failureSound === "sad") return playSadFailure();
+    if (failureSound === "beep") return playBeep(200, 400);
+    if (failureSound === "heartbeat") return playHeartbeat();
+    if (failureSound === "custom" && failureSoundCustom) {
+      let el = failureAudioCache[failureSoundCustom];
+      if (!el) {
+        el = new Audio(failureSoundCustom);
+        failureAudioCache[failureSoundCustom] = el;
       }
       try {
         el.currentTime = 0;
@@ -1196,6 +1348,8 @@
         celebrationType,
         successSound,
         successSoundCustom,
+        failureSound,
+        failureSoundCustom,
       };
       localStorage.setItem('appSettings', JSON.stringify(state));
     } catch {}
@@ -1233,12 +1387,14 @@
         if (typeof v.celebrationType === 'string') celebrationType = v.celebrationType;
         if (typeof v.successSound === 'string') successSound = v.successSound;
         if (typeof v.successSoundCustom === 'string') successSoundCustom = v.successSoundCustom;
+        if (typeof v.failureSound === 'string') failureSound = v.failureSound;
+        if (typeof v.failureSoundCustom === 'string') failureSoundCustom = v.failureSoundCustom;
       }
       // Broadcast celebration settings to overlay after loading (with delay to ensure bc is initialized)
       setTimeout(() => {
         if (bc) {
           try {
-            bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom});
+            bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom});
           } catch {}
         }
       }, 100);
@@ -1470,7 +1626,7 @@
                     if (overlay) {
                       try { await overlay.unminimize?.(); } catch {}
                       try { await overlay.setVisibleOnAllWorkspaces?.(true); } catch {}
-                      try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop || true); } catch {}
+                      try { await overlay.setAlwaysOnTop(overlayAlwaysOnTop); } catch {}
                       try { await overlay.show(); } catch {}
                       try { await overlay.setFocus(); } catch {}
                     }
@@ -1516,8 +1672,8 @@
                 if (overlay) {
                   await overlay.unminimize?.();
                   await overlay.setVisibleOnAllWorkspaces?.(true);
+                  await overlay.setAlwaysOnTop(overlayAlwaysOnTop); // Respect alwaysOnTop setting
                   await overlay.show();
-                  await overlay.setAlwaysOnTop(true); // force top if option enabled
                   await overlay.setFocus();
                 }
               })();
@@ -1868,15 +2024,15 @@
               <label class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Critical threshold (%)</span>
                 <Input type="range" min={0} max={99} bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
-                <span>{criticalPercent}%</span>
-              </label>
+          <span>{criticalPercent}%</span>
+        </label>
               <label class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Danger threshold (%)</span>
                 <Input type="range" min={0} max={99} bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
-                <span>{dangerPercent}%</span>
-              </label>
+          <span>{dangerPercent}%</span>
+        </label>
               <div class="[color:var(--color-muted)] text-xs">
-                Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.
+          Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.
               </div>
               <div class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Danger color</span>
@@ -1918,47 +2074,36 @@
           {#if accordionOpen.messages}
             <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
               <div class="text-sm [color:var(--color-muted)]">Messages (trigger when remaining ≤ %)</div>
-              {#each userMessages as msg, idx}
+        {#each userMessages as msg, idx}
                 <div class="flex gap-2 items-center">
                   <Input
-                    type="number"
+              type="number"
                     min={1}
                     max={99}
-                    bind:value={msg.percent}
+              bind:value={msg.percent}
                     class="w-20 p-2"
-                  />
+            />
                   <Input
-                    type="text"
-                    bind:value={msg.text}
-                    placeholder="Message to show"
+              type="text"
+              bind:value={msg.text}
+              placeholder="Message to show"
                     class="flex-1 p-2"
-                  />
+            />
                   <Select bind:value={msg.sound} class="p-2">
-                    <option value="beep">Beep</option>
-                    <option value="heartbeat">Heartbeat</option>
-                    <option value="none">None</option>
-                    <option value="custom">Custom</option>
+              <option value="beep">Beep</option>
+              <option value="heartbeat">Heartbeat</option>
+              <option value="none">None</option>
+              <option value="custom">Custom</option>
                   </Select>
-                  {#if msg.sound === "custom"}
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      onchange={async (e) => {
-                        const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => { msg.custom = String(reader.result || ""); };
-                        reader.readAsDataURL(file);
-                      }}
-                      class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-1"
-                    />
-                  {/if}
-                  <button
+            {#if msg.sound === "custom"}
+              <SoundEditor bind:value={msg.custom} class="flex-1" />
+            {/if}
+            <button
                     class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
-                    title="Remove"
-                    onclick={() => (userMessages = userMessages.filter((_, i) => i !== idx))}>×</button>
-                </div>
-              {/each}
+              title="Remove"
+              onclick={() => (userMessages = userMessages.filter((_, i) => i !== idx))}>×</button>
+          </div>
+        {/each}
 
               <div class="flex gap-3">
           <button
@@ -1986,6 +2131,19 @@
                 <span class="[color:var(--color-muted)] w-[180px]">Question text</span>
                 <Input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 p-2" />
         </label>
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">End sound</span>
+                <Select bind:value={endSound} onchange={_ => saveAppSettings()} class="flex-1 p-2">
+                  <option value="triple">Triple beep</option>
+                  <option value="beep">Beep</option>
+                  <option value="heartbeat">Heartbeat</option>
+                  <option value="none">None</option>
+                  <option value="custom">Custom file</option>
+                </Select>
+        </label>
+              {#if endSound === "custom"}
+                <SoundEditor bind:value={endSoundCustom} onvaluechange={(v) => { saveAppSettings(); }} />
+              {/if}
             </div>
           {/if}
         </div>
@@ -2003,7 +2161,7 @@
             <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
               <label class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Celebration type</span>
-                <Select bind:value={celebrationType} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom}); }} class="flex-1 p-2">
+                <Select bind:value={celebrationType} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
                   <option value="both">Confetti + Sound</option>
                   <option value="confetti">Confetti only</option>
                   <option value="sound">Sound only</option>
@@ -2013,7 +2171,9 @@
               {#if celebrationType === "both" || celebrationType === "sound"}
                 <label class="flex gap-3 items-center">
                   <span class="[color:var(--color-muted)] w-[180px]">Success sound</span>
-                  <Select bind:value={successSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom}); }} class="flex-1 p-2">
+                  <Select bind:value={successSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
+                    <option value="battlewin">Battle Win / Archangel</option>
+                    <option value="epic">Epic fanfare</option>
                     <option value="triple">Triple beep</option>
                     <option value="beep">Beep</option>
                     <option value="heartbeat">Heartbeat</option>
@@ -2022,41 +2182,24 @@
                   </Select>
                 </label>
                 {#if successSound === "custom"}
-                  <label class="flex flex-col gap-2">
-                    <span class="[color:var(--color-muted)] text-sm">Custom success sound file</span>
-                    <input
-                    type="file"
-                    accept="audio/*"
-                      class="text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
-                      onchange={async (e) => {
-                        const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            successSoundCustom = reader.result as string;
-                            saveAppSettings();
-                            if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom});
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
-                    {#if successSoundCustom}
-                      <button
-                        class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
-                        onclick={() => {
-                          successSoundCustom = undefined;
-                          saveAppSettings();
-                          if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom: undefined});
-                        }}
-                      >
-                        Remove custom sound
-                      </button>
-                    {/if}
-                  </label>
+                  <SoundEditor bind:value={successSoundCustom} onvaluechange={(v) => { successSoundCustom = v; saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom: v, failureSound, failureSoundCustom}); }} />
                 {/if}
               {/if}
-            </div>
+              <label class="flex gap-3 items-center">
+                <span class="[color:var(--color-muted)] w-[180px]">Failure sound</span>
+                <Select bind:value={failureSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
+                  <option value="yoos">Yoo yoo yoo yoo</option>
+                  <option value="sad">Sad tone</option>
+                  <option value="beep">Beep</option>
+                  <option value="heartbeat">Heartbeat</option>
+                  <option value="none">None</option>
+                  <option value="custom">Custom file</option>
+                </Select>
+              </label>
+              {#if failureSound === "custom"}
+                <SoundEditor bind:value={failureSoundCustom} onvaluechange={(v) => { failureSoundCustom = v; saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom: v}); }} />
+              {/if}
+        </div>
           {/if}
         </div>
 
@@ -2079,12 +2222,12 @@
                   <option value="normal">Normal</option>
                   <option value="progressbar">Progress Bar</option>
                 </Select>
-              </label>
+        </label>
               {#if overlayMode === "progressbar"}
                 <label class="flex gap-3 items-center">
                   <span class="[color:var(--color-muted)] w-[180px]">Progress bar color</span>
                   <Input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
-                </label>
+        </label>
                 <label class="flex gap-3 items-center">
                   <span class="[color:var(--color-muted)] w-[180px]">Progress bar finished color</span>
                   <Input type="color" bind:value={overlayProgressBarFinishedColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
@@ -2113,90 +2256,21 @@
             <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
               <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Color Theme</span>
                 <Select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 p-2">
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
                 </Select>
-              </label>
-              <div class="text-sm font-semibold [color:var(--color-muted)]">Background Images</div>
-              <label class="flex flex-col gap-2">
-                <span class="[color:var(--color-muted)] text-sm">App Background</span>
-                <div class="flex gap-2 items-center">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
-                    onchange={async (e) => {
-                      const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          appBackgroundImage = reader.result as string;
-                          saveAppSettings();
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                  />
-                  {#if appBackgroundImage}
-                    <button
-                      class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
-                      onclick={() => {
-                        appBackgroundImage = null;
-                        saveAppSettings();
-                      }}
-                    >
-                      Remove
-                    </button>
-                  {/if}
+        </label>
+              <div class="text-sm font-semibold [color:var(--color-muted)] mb-2">Background Images</div>
+              <div class="flex flex-col gap-4">
+                <div>
+                  <div class="text-xs [color:var(--color-muted)] mb-1 font-medium">App Background</div>
+                  <ImageEditor bind:value={appBackgroundImage} onvaluechange={(v) => { appBackgroundImage = v ?? null; saveAppSettings(); }} />
+      </div>
+                <div>
+                  <div class="text-xs [color:var(--color-muted)] mb-1 font-medium">Overlay Background</div>
+                  <ImageEditor bind:value={overlayBackgroundImage} onvaluechange={(v) => { overlayBackgroundImage = v ?? null; saveAppSettings(); if (bc) { bc.postMessage({ source: 'main', type: 'overlay_background', backgroundImage: v ?? null }); } }} />
                 </div>
-              </label>
-              <label class="flex flex-col gap-2">
-                <span class="[color:var(--color-muted)] text-sm">Overlay Background</span>
-                <div class="flex gap-2 items-center">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    class="flex-1 text-sm [color:var(--color-foreground)] [background-color:var(--color-card)] border [border-color:var(--color-card-border)] rounded-lg px-3 py-2 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:[background-color:var(--color-primary)] file:text-[#05210c] hover:file:opacity-90 cursor-pointer"
-                    onchange={async (e) => {
-                      const file = (e.currentTarget as HTMLInputElement).files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          overlayBackgroundImage = reader.result as string;
-                          saveAppSettings();
-                          // Broadcast to overlay
-                          if (bc) {
-                            bc.postMessage({
-                              source: 'main',
-                              type: 'overlay_background',
-                              backgroundImage: overlayBackgroundImage
-                            });
-                          }
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                  />
-                  {#if overlayBackgroundImage}
-                    <button
-                      class="px-3 py-2 text-sm rounded-lg border [border-color:var(--color-card-border)] [color:var(--color-foreground)] hover:[background-color:var(--color-card-border)] transition-colors"
-                      onclick={() => {
-                        overlayBackgroundImage = null;
-                        saveAppSettings();
-                        if (bc) {
-                          bc.postMessage({
-                            source: 'main',
-                            type: 'overlay_background',
-                            backgroundImage: null
-                          });
-                        }
-                      }}
-                    >
-                      Remove
-                    </button>
-                  {/if}
-                </div>
-              </label>
+              </div>
             </div>
           {/if}
         </div>

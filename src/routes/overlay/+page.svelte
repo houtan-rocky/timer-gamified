@@ -37,6 +37,7 @@
   let editError = $state("");
   let editInputEl: any = $state(null);
   let overlayAlwaysOnTop = false;
+  let overlayPopupOnEnd = false;
   let colorTheme = "dark";
   let bringingToFront = false;
   let overlayMode = $state("normal");
@@ -46,10 +47,13 @@
   let overlayBackgroundImage = $state<string | null>(null);
   let showConfetti = $state(false);
   type CelebrationType = "both" | "confetti" | "sound" | "none";
-  type SuccessSound = "triple" | "beep" | "heartbeat" | "none" | "custom";
+  type SuccessSound = "battlewin" | "epic" | "triple" | "beep" | "heartbeat" | "none" | "custom";
+  type FailureSound = "yoos" | "sad" | "beep" | "heartbeat" | "none" | "custom";
   let celebrationType = $state<CelebrationType>("both");
-  let successSound: SuccessSound = $state("triple");
+  let successSound: SuccessSound = $state("battlewin");
   let successSoundCustom: string | undefined = undefined;
+  let failureSound: FailureSound = $state("yoos");
+  let failureSoundCustom: string | undefined = undefined;
   function updateOverlayTheme(newTheme: string) {
     colorTheme = newTheme;
     document.body.classList.toggle("theme-dark", colorTheme === "dark");
@@ -266,9 +270,136 @@
     setTimeout(() => playBeep(120, 1200), 400);
   }
 
+  function playBattleWin() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Epic battle win / archangel fanfare: powerful ascending chords with triumphant ending
+    const notes = [
+      // Opening powerful chord
+      { freq: 392.00, time: 0, dur: 0.25 },     // G4
+      { freq: 493.88, time: 0, dur: 0.25 },     // B4
+      { freq: 587.33, time: 0, dur: 0.25 },     // D5
+      // Ascending progression
+      { freq: 523.25, time: 0.3, dur: 0.2 },    // C5
+      { freq: 659.25, time: 0.3, dur: 0.2 },    // E5
+      { freq: 783.99, time: 0.3, dur: 0.2 },    // G5
+      // Climactic chord
+      { freq: 659.25, time: 0.55, dur: 0.25 },  // E5
+      { freq: 783.99, time: 0.55, dur: 0.25 },  // G5
+      { freq: 987.77, time: 0.55, dur: 0.25 },  // B5
+      // Triumphant high notes
+      { freq: 1046.50, time: 0.85, dur: 0.3 },  // C6
+      { freq: 1318.51, time: 1.15, dur: 0.35 }, // E6
+      { freq: 1567.98, time: 1.5, dur: 0.4 },  // G6 - epic high note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      // Use more harmonic waveform for richer sound
+      osc.type = note.freq > 1000 ? "triangle" : "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.25, audioCtx!.currentTime + note.time + 0.02);
+      gain.gain.linearRampToValueAtTime(0, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
+  function playEpicSuccess() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Epic fanfare: ascending major chord progression with rhythm
+    const notes = [
+      { freq: 523.25, time: 0, dur: 0.15 },      // C5
+      { freq: 659.25, time: 0, dur: 0.15 },      // E5
+      { freq: 783.99, time: 0, dur: 0.15 },      // G5
+      { freq: 659.25, time: 0.2, dur: 0.12 },   // E5
+      { freq: 783.99, time: 0.2, dur: 0.12 },   // G5
+      { freq: 987.77, time: 0.2, dur: 0.12 },   // B5
+      { freq: 1046.50, time: 0.35, dur: 0.25 }, // C6 - climactic note
+      { freq: 1318.51, time: 0.6, dur: 0.3 },    // E6 - high note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.2, audioCtx!.currentTime + note.time + 0.02);
+      gain.gain.linearRampToValueAtTime(0, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
+  function playYoosFailure() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // "Yoo yoo yoo yoo" - descending "whoops" sound
+    const yoos = [
+      { freq: 880, time: 0, dur: 0.12 },      // A5 - "Yoo"
+      { freq: 740, time: 0.15, dur: 0.12 },  // F#5 - "yoo"
+      { freq: 622, time: 0.3, dur: 0.12 },   // D#5 - "yoo"
+      { freq: 523, time: 0.45, dur: 0.15 },  // C5 - "yoo" (final)
+    ];
+    
+    yoos.forEach((yoo, i) => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      // Slide down frequency for "yoo" effect
+      const startFreq = yoo.freq;
+      const endFreq = yoo.freq * 0.7;
+      osc.frequency.setValueAtTime(startFreq, audioCtx!.currentTime + yoo.time);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, audioCtx!.currentTime + yoo.time + yoo.dur);
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + yoo.time);
+      gain.gain.linearRampToValueAtTime(0.18, audioCtx!.currentTime + yoo.time + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx!.currentTime + yoo.time + yoo.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + yoo.time);
+      osc.stop(audioCtx!.currentTime + yoo.time + yoo.dur + 0.02);
+    });
+  }
+
+  function playSadFailure() {
+    ensureAudio();
+    if (!audioCtx) return;
+    
+    // Sad descending minor notes
+    const notes = [
+      { freq: 587.33, time: 0, dur: 0.2 },       // D5
+      { freq: 523.25, time: 0.15, dur: 0.2 },   // C5
+      { freq: 466.16, time: 0.3, dur: 0.3 },     // Bb4
+      { freq: 392.00, time: 0.45, dur: 0.4 },    // G4 - final low note
+    ];
+    
+    notes.forEach(note => {
+      const osc = audioCtx!.createOscillator();
+      const gain = audioCtx!.createGain();
+      osc.type = "sine";
+      osc.frequency.value = note.freq;
+      gain.gain.setValueAtTime(0, audioCtx!.currentTime + note.time);
+      gain.gain.linearRampToValueAtTime(0.15, audioCtx!.currentTime + note.time + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx!.currentTime + note.time + note.dur);
+      osc.connect(gain).connect(audioCtx!.destination);
+      osc.start(audioCtx!.currentTime + note.time);
+      osc.stop(audioCtx!.currentTime + note.time + note.dur + 0.05);
+    });
+  }
+
   const successAudioCache: Record<string, HTMLAudioElement> = {};
   function playSuccessSound() {
     if (successSound === "none") return;
+    if (successSound === "battlewin") return playBattleWin();
+    if (successSound === "epic") return playEpicSuccess();
     if (successSound === "triple") return playTripleBeep();
     if (successSound === "beep") return playBeep(300, 1500);
     if (successSound === "heartbeat") return playHeartbeat();
@@ -277,6 +408,26 @@
       if (!el) {
         el = new Audio(successSoundCustom);
         successAudioCache[successSoundCustom] = el;
+      }
+      try {
+        el.currentTime = 0;
+        el.play();
+      } catch {}
+    }
+  }
+
+  const failureAudioCache: Record<string, HTMLAudioElement> = {};
+  function playFailureSound() {
+    if (failureSound === "none") return;
+    if (failureSound === "yoos") return playYoosFailure();
+    if (failureSound === "sad") return playSadFailure();
+    if (failureSound === "beep") return playBeep(200, 400);
+    if (failureSound === "heartbeat") return playHeartbeat();
+    if (failureSound === "custom" && failureSoundCustom) {
+      let el = failureAudioCache[failureSoundCustom];
+      if (!el) {
+        el = new Audio(failureSoundCustom);
+        failureAudioCache[failureSoundCustom] = el;
       }
       try {
         el.currentTime = 0;
@@ -354,7 +505,7 @@
     if (isTauri && !overlayAlwaysOnTop) {
       import("@tauri-apps/api/webviewWindow").then(
         ({ getCurrentWebviewWindow }) => {
-          getCurrentWebviewWindow().setAlwaysOnTop(false);
+        getCurrentWebviewWindow().setAlwaysOnTop(false);
         }
       );
     }
@@ -414,6 +565,7 @@
       } catch {}
     }
     const alwaysOnTopParam = url.searchParams.get("alwaysOnTop");
+    const popupOnEndParam = url.searchParams.get("popupOnEnd");
     const overlayModeParam = url.searchParams.get("overlayMode");
     const progressBarColorParam = url.searchParams.get("progressBarColor");
     const progressBarFinishedColorParam = url.searchParams.get("progressBarFinishedColor");
@@ -421,6 +573,8 @@
     const overlayBackgroundImageParam = url.searchParams.get("overlayBackgroundImage");
     overlayAlwaysOnTop =
       alwaysOnTopParam === "1" || alwaysOnTopParam === "true";
+    overlayPopupOnEnd =
+      popupOnEndParam === "1" || popupOnEndParam === "true";
     if (overlayModeParam) overlayMode = overlayModeParam;
     if (progressBarColorParam) progressBarColor = progressBarColorParam;
     if (progressBarFinishedColorParam) progressBarFinishedColor = progressBarFinishedColorParam;
@@ -501,10 +655,10 @@
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       await WebviewWindow.getByLabel("overlay").then((parent) =>
         parent?.listen<string>("overlay:navigate", (e: { payload: string }) => {
-          const target = e.payload;
-          if (typeof target === "string") {
-            window.location.replace(target);
-          }
+        const target = e.payload;
+        if (typeof target === "string") {
+          window.location.replace(target);
+        }
         })
       );
     }
@@ -554,30 +708,32 @@
             pause();
             hasEnded = true;
             resultRecorded = false;
-            // Bring overlay to front when timer ends
-            const isTauriEnd = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
-            if (isTauriEnd) {
-              (async () => {
-                try {
-                  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-                  const current = getCurrentWebviewWindow();
+            // Bring overlay to front when timer ends (if popup on end is enabled)
+            if (overlayPopupOnEnd) {
+              const isTauriEnd = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+              if (isTauriEnd) {
+                (async () => {
                   try {
-                    await current.unminimize?.();
+                    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                    const current = getCurrentWebviewWindow();
+                    try {
+                      await current.unminimize?.();
+                    } catch {}
+                    try {
+                      await current.setVisibleOnAllWorkspaces(true);
+                    } catch {}
+                    try {
+                      await current.setAlwaysOnTop(overlayAlwaysOnTop); // Respect alwaysOnTop setting
+                    } catch {}
+                    try {
+                      await current.show();
+                    } catch {}
+                    try {
+                      await current.setFocus();
+                    } catch {}
                   } catch {}
-                  try {
-                    await current.setVisibleOnAllWorkspaces(true);
-                  } catch {}
-                  try {
-                    await current.setAlwaysOnTop(true);
-                  } catch {}
-                  try {
-                    await current.show();
-                  } catch {}
-                  try {
-                    await current.setFocus();
-                  } catch {}
-                } catch {}
-              })();
+                })();
+              }
             }
           } else if (data.type === "result") {
             resultRecorded = true;
@@ -633,20 +789,28 @@
             } else if (data.successSoundCustom === null || data.successSoundCustom === undefined) {
               successSoundCustom = undefined;
             }
+            if (typeof data.failureSound === "string") {
+              failureSound = data.failureSound as FailureSound;
+            }
+            if (typeof data.failureSoundCustom === "string") {
+              failureSoundCustom = data.failureSoundCustom;
+            } else if (data.failureSoundCustom === null || data.failureSoundCustom === undefined) {
+              failureSoundCustom = undefined;
+            }
           } else if (data.source === "main" && data.type === "overlay_background") {
             overlayBackgroundImage = data.backgroundImage || null;
           } else if (data.source === "main" && data.type === "overlay_popup") {
-            if (isTauri && !bringingToFront) {
+            if (overlayPopupOnEnd && isTauri && !bringingToFront) {
               bringingToFront = true;
               import("@tauri-apps/api/webviewWindow").then(
                 async ({ getCurrentWebviewWindow }) => {
-                  const current = getCurrentWebviewWindow();
-                  try {
+                const current = getCurrentWebviewWindow();
+                try {
                     const Ctx =
                       window.AudioContext || (window as any).webkitAudioContext;
-                    if (Ctx && !audioCtx) audioCtx = new Ctx();
-                    await audioCtx?.resume?.();
-                  } catch {}
+                  if (Ctx && !audioCtx) audioCtx = new Ctx();
+                  await audioCtx?.resume?.();
+                } catch {}
                   try {
                     await current.unminimize?.();
                   } catch {}
@@ -654,7 +818,7 @@
                     await current.setVisibleOnAllWorkspaces(true);
                   } catch {}
                   try {
-                    await current.setAlwaysOnTop(true);
+                    await current.setAlwaysOnTop(overlayAlwaysOnTop); // Respect alwaysOnTop setting
                   } catch {}
                   try {
                     await current.show();
@@ -715,30 +879,32 @@
                   pause();
                   hasEnded = true;
                   resultRecorded = false; // Reset so question can show
-                  // Bring overlay to front when timer ends (from state sync)
-                  const isTauriState = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
-                  if (isTauriState) {
-                    (async () => {
-                      try {
-                        const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-                        const current = getCurrentWebviewWindow();
+                  // Bring overlay to front when timer ends (if popup on end is enabled)
+                  if (overlayPopupOnEnd) {
+                    const isTauriState = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+                    if (isTauriState) {
+                      (async () => {
                         try {
-                          await current.unminimize?.();
+                          const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                          const current = getCurrentWebviewWindow();
+                          try {
+                            await current.unminimize?.();
+                          } catch {}
+                          try {
+                            await current.setVisibleOnAllWorkspaces(true);
+                          } catch {}
+                          try {
+                            await current.setAlwaysOnTop(overlayAlwaysOnTop); // Respect alwaysOnTop setting
+                          } catch {}
+                          try {
+                            await current.show();
+                          } catch {}
+                          try {
+                            await current.setFocus();
+                          } catch {}
                         } catch {}
-                        try {
-                          await current.setVisibleOnAllWorkspaces(true);
-                        } catch {}
-                        try {
-                          await current.setAlwaysOnTop(true);
-                        } catch {}
-                        try {
-                          await current.show();
-                        } catch {}
-                        try {
-                          await current.setFocus();
-                        } catch {}
-                      } catch {}
-                    })();
+                      })();
+                    }
                   }
                 }
               }, 1000);
@@ -784,6 +950,16 @@
   function recordResult(win: boolean) {
     if (resultRecorded !== false) return;
     resultRecorded = true;
+    
+    // Ensure audio context is available
+    try {
+      if (!audioCtx) {
+        const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      }
+      audioCtx?.resume?.();
+    } catch {}
+    
     if (win) {
       // Show confetti based on celebration type
       if (celebrationType === "both" || celebrationType === "confetti") {
@@ -794,16 +970,11 @@
       }
       // Play success sound based on celebration type
       if (celebrationType === "both" || celebrationType === "sound") {
-        // Ensure audio context is available
-        try {
-          if (!audioCtx) {
-            const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-            if (Ctx) audioCtx = new Ctx();
-          }
-          audioCtx?.resume?.();
-        } catch {}
         playSuccessSound();
       }
+    } else {
+      // Play failure sound
+      playFailureSound();
     }
     try {
       bc?.postMessage({
@@ -885,7 +1056,7 @@
           style={`left: ${startLeft}%; top: ${startTop}%; width: ${size}px; height: ${size}px; background: linear-gradient(135deg, ${color}, ${color}dd); box-shadow: 0 0 8px ${color}aa; --translate-x: ${translateX}vw; --translate-y: ${translateY}vh; animation: confetti-burst ${duration}ms ${delay}ms ease-out forwards;`}
         ></div>
       {/each}
-    </div>
+  </div>
   {/if}
   <!-- Header with date/time and zone indicator -->
   <div class="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-2 bg-gradient-to-b from-black/40 via-black/20 to-transparent [-webkit-app-region:no-drag]">
@@ -921,8 +1092,8 @@
           <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
             <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
-          </svg>
-        </button>
+        </svg>
+      </button>
         <button
           class="relative w-20 h-20 rounded-2xl border-2 border-[rgba(255,68,68,0.7)] bg-gradient-to-br from-[rgba(255,68,68,0.25)] to-[rgba(255,68,68,0.15)] hover:from-[rgba(255,68,68,0.35)] hover:to-[rgba(255,68,68,0.25)] hover:border-[rgba(255,68,68,0.9)] text-white grid place-items-center transition-all active:scale-95 shadow-[0_6px_20px_rgba(255,68,68,0.4)] [-webkit-app-region:no-drag] group overflow-hidden"
           onclick={() => recordResult(false)}
@@ -932,8 +1103,8 @@
           <div class="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="group-hover:scale-110 transition-transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">
             <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
-          </svg>
-        </button>
+        </svg>
+      </button>
       </div>
     </div>
   {:else}
@@ -959,7 +1130,7 @@
         }}
         title="Click to edit time"
       >
-        {#if editingTime}
+      {#if editingTime}
           <div class="flex flex-col items-center gap-2">
             <Input
               type="text"
@@ -973,19 +1144,19 @@
                 else if (e.key === "Escape") cancelTimeEdit();
               }}
             />
-            {#if editError}
+          {#if editError}
               <div class="text-xs text-[#ff5a5a] font-medium animate-[slideIn_0.2s_ease-out]">{editError}</div>
-            {/if}
-          </div>
-        {:else}
+          {/if}
+        </div>
+      {:else}
           <div class="relative">
             <!-- Timer digits with enhanced styling -->
             <span class="inline-block">{formatTime(remainingSeconds)}</span>
             {#if isRunning && remainingSeconds > 0 && remainingSeconds <= 10}
               <span class="absolute inset-0 animate-[countdown-tick_1s_ease-in-out_infinite] opacity-50"></span>
-            {/if}
-          </div>
-        {/if}
+      {/if}
+    </div>
+  {/if}
       </div>
 
       <!-- Progress indicator bar (when not in progressbar mode) -->
@@ -1014,7 +1185,7 @@
             >
               Start
             </button>
-          {:else}
+    {:else}
             <!-- Resume button (left, rounded left) -->
             <button 
               class="px-4 py-2 rounded-l-lg border-r border-[rgba(255,255,255,0.1)] bg-transparent hover:bg-[rgba(255,255,255,0.08)] active:bg-[rgba(255,255,255,0.12)] [color:var(--color-foreground)] text-xs font-medium uppercase tracking-wide transition-colors duration-150 theme-light:border-[rgba(0,0,0,0.1)] theme-light:hover:bg-[rgba(0,0,0,0.04)] theme-light:active:bg-[rgba(0,0,0,0.06)]" 
@@ -1022,7 +1193,7 @@
             >
               Resume
             </button>
-          {/if}
+    {/if}
         {:else if !hasEnded}
           <!-- Pause button (left, rounded left) -->
           <button 
@@ -1031,7 +1202,7 @@
           >
             Pause
           </button>
-        {/if}
+    {/if}
         {#if !hasEnded && hasStarted}
           <!-- Stop button (middle, square) -->
           <button 
