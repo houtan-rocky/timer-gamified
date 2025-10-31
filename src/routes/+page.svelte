@@ -11,6 +11,11 @@
   // Check if we're in dev mode
   const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
   
+  // Debounce timeouts for celebration settings
+  let celebrationSaveTimeout: number | null = null;
+  let successSoundSaveTimeout: number | null = null;
+  let failureSoundSaveTimeout: number | null = null;
+  
   // Add 5-second preset in dev mode
   let presets = $state<number[]>(isDev ? [5, 120, 600, 1200] : [120, 600, 1200]);
   let selectedSeconds = $state(120);
@@ -927,7 +932,20 @@
 
   // Message sounds
   const audioCache: Record<string, HTMLAudioElement> = {};
-  function playMessageSound(kind: MessageSound | undefined, custom?: string) {
+  async function loadAudioFromHash(hash: string): Promise<string | null> {
+    if (!/^[a-f0-9]{64}$/i.test(hash)) return hash; // Not a hash, return as-is
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const data = await invoke<number[]>('get_sound', { hash });
+      const blob = new Blob([new Uint8Array(data)], { type: 'audio/wav' });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error('Failed to load sound from backend:', e);
+      return null;
+    }
+  }
+  
+  async function playMessageSound(kind: MessageSound | undefined, custom?: string) {
     const k = kind ?? "beep";
     if (k === "none") return;
     if (k === "beep") {
@@ -939,10 +957,17 @@
       return;
     }
     if (k === "custom" && custom) {
+      let url = custom;
+      // Check if it's a hash and load from backend
+      if (/^[a-f0-9]{64}$/i.test(custom)) {
+        url = await loadAudioFromHash(custom) || custom;
+      }
       let el = audioCache[custom];
       if (!el) {
-        el = new Audio(custom);
+        el = new Audio(url);
         audioCache[custom] = el;
+      } else if (el.src !== url) {
+        el.src = url;
       }
       try {
         el.currentTime = 0;
@@ -1187,7 +1212,7 @@
   }
 
   const successAudioCache: Record<string, HTMLAudioElement> = {};
-  function playSuccessSound() {
+  async function playSuccessSound() {
     if (successSound === "none") return;
     if (successSound === "battlewin") return playBattleWin();
     if (successSound === "epic") return playEpicSuccess();
@@ -1195,10 +1220,17 @@
     if (successSound === "beep") return playBeep(300, 1500);
     if (successSound === "heartbeat") return playHeartbeat();
     if (successSound === "custom" && successSoundCustom) {
+      let url = successSoundCustom;
+      // Check if it's a hash and load from backend
+      if (/^[a-f0-9]{64}$/i.test(successSoundCustom)) {
+        url = await loadAudioFromHash(successSoundCustom) || successSoundCustom;
+      }
       let el = successAudioCache[successSoundCustom];
       if (!el) {
-        el = new Audio(successSoundCustom);
+        el = new Audio(url);
         successAudioCache[successSoundCustom] = el;
+      } else if (el.src !== url) {
+        el.src = url;
       }
       try {
         el.currentTime = 0;
@@ -1208,17 +1240,24 @@
   }
 
   const failureAudioCache: Record<string, HTMLAudioElement> = {};
-  function playFailureSound() {
+  async function playFailureSound() {
     if (failureSound === "none") return;
     if (failureSound === "yoos") return playYoosFailure();
     if (failureSound === "sad") return playSadFailure();
     if (failureSound === "beep") return playBeep(200, 400);
     if (failureSound === "heartbeat") return playHeartbeat();
     if (failureSound === "custom" && failureSoundCustom) {
+      let url = failureSoundCustom;
+      // Check if it's a hash and load from backend
+      if (/^[a-f0-9]{64}$/i.test(failureSoundCustom)) {
+        url = await loadAudioFromHash(failureSoundCustom) || failureSoundCustom;
+      }
       let el = failureAudioCache[failureSoundCustom];
       if (!el) {
-        el = new Audio(failureSoundCustom);
+        el = new Audio(url);
         failureAudioCache[failureSoundCustom] = el;
+      } else if (el.src !== url) {
+        el.src = url;
       }
       try {
         el.currentTime = 0;
@@ -1228,7 +1267,7 @@
   }
 
   const endAudioCache: Record<string, HTMLAudioElement> = {};
-  function playEndSound() {
+  async function playEndSound() {
     if (hasFiredEndSound) return;
     hasFiredEndSound = true;
     if (endSound === "none") return;
@@ -1236,10 +1275,17 @@
     if (endSound === "beep") return playBeep(200, 1000);
     if (endSound === "heartbeat") return playHeartbeat();
     if (endSound === "custom" && endSoundCustom) {
+      let url = endSoundCustom;
+      // Check if it's a hash and load from backend
+      if (/^[a-f0-9]{64}$/i.test(endSoundCustom)) {
+        url = await loadAudioFromHash(endSoundCustom) || endSoundCustom;
+      }
       let el = endAudioCache[endSoundCustom];
       if (!el) {
-        el = new Audio(endSoundCustom);
+        el = new Audio(url);
         endAudioCache[endSoundCustom] = el;
+      } else if (el.src !== url) {
+        el.src = url;
       }
       try {
         el.currentTime = 0;
@@ -2161,7 +2207,13 @@
             <div class="px-4 pb-4 grid gap-3 border-t [border-color:var(--color-card-border)]">
               <label class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Celebration type</span>
-                <Select bind:value={celebrationType} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
+                <Select bind:value={celebrationType} onchange={_ => { 
+                  if (celebrationSaveTimeout) clearTimeout(celebrationSaveTimeout);
+                  celebrationSaveTimeout = setTimeout(() => {
+                    saveAppSettings(); 
+                    if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom});
+                  }, 200);
+                }} class="flex-1 p-2">
                   <option value="both">Confetti + Sound</option>
                   <option value="confetti">Confetti only</option>
                   <option value="sound">Sound only</option>
@@ -2171,7 +2223,13 @@
               {#if celebrationType === "both" || celebrationType === "sound"}
                 <label class="flex gap-3 items-center">
                   <span class="[color:var(--color-muted)] w-[180px]">Success sound</span>
-                  <Select bind:value={successSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
+                  <Select bind:value={successSound} onchange={_ => { 
+                    if (celebrationSaveTimeout) clearTimeout(celebrationSaveTimeout);
+                    celebrationSaveTimeout = setTimeout(() => {
+                      saveAppSettings(); 
+                      if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom});
+                    }, 200);
+                  }} class="flex-1 p-2">
                     <option value="battlewin">Battle Win / Archangel</option>
                     <option value="epic">Epic fanfare</option>
                     <option value="triple">Triple beep</option>
@@ -2182,12 +2240,26 @@
                   </Select>
                 </label>
                 {#if successSound === "custom"}
-                  <SoundEditor bind:value={successSoundCustom} onvaluechange={(v) => { successSoundCustom = v; saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom: v, failureSound, failureSoundCustom}); }} />
+                  <SoundEditor bind:value={successSoundCustom} onvaluechange={(v) => { 
+                    successSoundCustom = v; 
+                    // Debounce saves
+                    if (successSoundSaveTimeout) clearTimeout(successSoundSaveTimeout);
+                    successSoundSaveTimeout = setTimeout(() => {
+                      saveAppSettings(); 
+                      if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom: v, failureSound, failureSoundCustom});
+                    }, 300);
+                  }} />
                 {/if}
               {/if}
               <label class="flex gap-3 items-center">
                 <span class="[color:var(--color-muted)] w-[180px]">Failure sound</span>
-                <Select bind:value={failureSound} onchange={_ => { saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom}); }} class="flex-1 p-2">
+                <Select bind:value={failureSound} onchange={_ => { 
+                  if (celebrationSaveTimeout) clearTimeout(celebrationSaveTimeout);
+                  celebrationSaveTimeout = setTimeout(() => {
+                    saveAppSettings(); 
+                    if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom});
+                  }, 200);
+                }} class="flex-1 p-2">
                   <option value="yoos">Yoo yoo yoo yoo</option>
                   <option value="sad">Sad tone</option>
                   <option value="beep">Beep</option>
@@ -2197,7 +2269,15 @@
                 </Select>
               </label>
               {#if failureSound === "custom"}
-                <SoundEditor bind:value={failureSoundCustom} onvaluechange={(v) => { failureSoundCustom = v; saveAppSettings(); if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom: v}); }} />
+                <SoundEditor bind:value={failureSoundCustom} onvaluechange={(v) => { 
+                  failureSoundCustom = v; 
+                  // Debounce saves
+                  if (failureSoundSaveTimeout) clearTimeout(failureSoundSaveTimeout);
+                  failureSoundSaveTimeout = setTimeout(() => {
+                    saveAppSettings(); 
+                    if (bc) bc.postMessage({source:'main', type:'celebration_settings', celebrationType, successSound, successSoundCustom, failureSound, failureSoundCustom: v});
+                  }, 300);
+                }} />
               {/if}
         </div>
           {/if}

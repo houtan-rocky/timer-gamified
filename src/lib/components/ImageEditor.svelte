@@ -30,19 +30,56 @@
   let sepia = $state(0);
   let blur = $state(0);
 
-  function handleFileChange(e: Event) {
+  async function handleFileChange(e: Event) {
     const file = (e.currentTarget as HTMLInputElement).files?.[0];
     if (!file) return;
     
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = reader.result as string;
-      loadImage(result);
+      // Extract base64 content
+      const base64Content = result.split(',')[1];
+      const binaryData = Uint8Array.from(atob(base64Content), c => c.charCodeAt(0));
+      
+      // Upload to backend
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const hash = await invoke<string>('upload_image', { data: Array.from(binaryData) });
+        value = hash;
+        onvaluechange?.(hash);
+        await loadImage(hash);
+      } catch (e) {
+        console.error('Failed to upload image:', e);
+        // Fallback to base64 if backend fails
+        value = result;
+        onvaluechange?.(result);
+        loadImageFromDataUrl(result);
+      }
     };
     reader.readAsDataURL(file);
   }
 
-  function loadImage(url: string) {
+  async function loadImage(hashOrUrl: string) {
+    // Check if it's a hash (64 hex chars) or data URL
+    if (hashOrUrl.startsWith('data:')) {
+      loadImageFromDataUrl(hashOrUrl);
+    } else if (/^[a-f0-9]{64}$/i.test(hashOrUrl)) {
+      // It's a hash, load from backend
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const data = await invoke<number[]>('get_image', { hash: hashOrUrl });
+        const blob = new Blob([new Uint8Array(data)]);
+        const url = URL.createObjectURL(blob);
+        loadImageFromDataUrl(url);
+      } catch (e) {
+        console.error('Failed to load image from backend:', e);
+      }
+    } else {
+      loadImageFromDataUrl(hashOrUrl);
+    }
+  }
+
+  function loadImageFromDataUrl(url: string) {
     const img = new Image();
     img.onload = () => {
       sourceImage = img;
@@ -216,7 +253,7 @@
     drawImage();
   }
 
-  function applyChanges() {
+  async function applyChanges() {
     if (!sourceImage || !previewCanvas) return;
     
     // Calculate actual crop coordinates on source image
@@ -259,13 +296,35 @@
       0, 0, sourceWidth, sourceHeight
     );
     
-    // Convert to data URL and update value
-    const result = outputCanvas.toDataURL('image/png');
-    value = result;
-    onvaluechange?.(result);
-    
-    // Update preview
-    loadImage(result);
+    // Convert to PNG blob
+    outputCanvas.toBlob(async (blob) => {
+      if (!blob) return;
+      
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+        const base64Content = base64Data.split(',')[1];
+        const binaryData = Uint8Array.from(atob(base64Content), c => c.charCodeAt(0));
+        
+        // Upload to backend
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const hash = await invoke<string>('upload_image', { data: Array.from(binaryData) });
+          value = hash;
+          onvaluechange?.(hash);
+          
+          // Update preview
+          await loadImage(hash);
+        } catch (e) {
+          console.error('Failed to upload image:', e);
+          // Fallback to data URL
+          value = base64Data;
+          onvaluechange?.(base64Data);
+          loadImageFromDataUrl(base64Data);
+        }
+      };
+      reader.readAsDataURL(blob);
+    }, 'image/png');
   }
 
   function removeImage() {
@@ -291,6 +350,16 @@
   $effect(() => {
     if (showEditor && sourceImage) {
       drawImage();
+    }
+  });
+  
+  // Load image when value changes (including hash values)
+  $effect(() => {
+    if (value && !sourceImage) {
+      // Wait for canvas to be created
+      setTimeout(() => {
+        loadImage(value);
+      }, 100);
     }
   });
 </script>

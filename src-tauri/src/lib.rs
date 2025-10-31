@@ -8,6 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use sha2::{Sha256, Digest};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct LicenseData {
@@ -137,12 +138,78 @@ fn remove_license(app_handle: tauri::AppHandle) -> Result<bool, String> {
     }
 }
 
+// Get media storage directory
+fn get_media_dir(app_handle: &tauri::AppHandle) -> PathBuf {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .expect("failed to get app data directory");
+    let media_dir = app_data_dir.join("media");
+    std::fs::create_dir_all(&media_dir).expect("failed to create media directory");
+    std::fs::create_dir_all(media_dir.join("images")).expect("failed to create images directory");
+    std::fs::create_dir_all(media_dir.join("sounds")).expect("failed to create sounds directory");
+    media_dir
+}
+
+// Hash data using SHA256
+fn hash_data(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+#[tauri::command]
+fn upload_image(app_handle: tauri::AppHandle, data: Vec<u8>) -> Result<String, String> {
+    let hash = hash_data(&data);
+    let media_dir = get_media_dir(&app_handle);
+    let image_path = media_dir.join("images").join(&hash);
+    
+    match fs::write(&image_path, data) {
+        Ok(_) => Ok(hash),
+        Err(e) => Err(format!("Failed to save image: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn upload_sound(app_handle: tauri::AppHandle, data: Vec<u8>) -> Result<String, String> {
+    let hash = hash_data(&data);
+    let media_dir = get_media_dir(&app_handle);
+    let sound_path = media_dir.join("sounds").join(&hash);
+    
+    match fs::write(&sound_path, data) {
+        Ok(_) => Ok(hash),
+        Err(e) => Err(format!("Failed to save sound: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn get_image(app_handle: tauri::AppHandle, hash: String) -> Result<Vec<u8>, String> {
+    let media_dir = get_media_dir(&app_handle);
+    let image_path = media_dir.join("images").join(&hash);
+    
+    match fs::read(&image_path) {
+        Ok(data) => Ok(data),
+        Err(e) => Err(format!("Failed to read image: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn get_sound(app_handle: tauri::AppHandle, hash: String) -> Result<Vec<u8>, String> {
+    let media_dir = get_media_dir(&app_handle);
+    let sound_path = media_dir.join("sounds").join(&hash);
+    
+    match fs::read(&sound_path) {
+        Ok(data) => Ok(data),
+        Err(e) => Err(format!("Failed to read sound: {}", e)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![greet, check_license, activate_license, remove_license])
+        .invoke_handler(tauri::generate_handler![greet, check_license, activate_license, remove_license, upload_image, upload_sound, get_image, get_sound])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
