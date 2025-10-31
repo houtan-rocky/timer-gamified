@@ -4,13 +4,13 @@
   import Input from "../../lib/components/Input.svelte";
 
   let initialSeconds = $state(60);
-  let remainingSeconds = $state(initialSeconds);
+  let remainingSeconds = $state(60);
   let isRunning = $state(false);
   let intervalId: number | null = null;
   let criticalPercent = $state(50);
   let dangerPercent = $state(20);
   let startAtMs: number | null = null;
-  let runDurationSeconds = $state(initialSeconds);
+  let runDurationSeconds = $state(60);
   let lastStartSig: number | null = null;
   type UserMessage = { percent: number; text: string; fired?: boolean };
   type MessageSound = "beep" | "heartbeat" | "none" | "custom";
@@ -35,7 +35,7 @@
   let editingTime = $state(false);
   let editTimeStr = $state("");
   let editError = $state("");
-  let editInputEl: any = null;
+  let editInputEl: any = $state(null);
   let overlayAlwaysOnTop = false;
   let colorTheme = "dark";
   let bringingToFront = false;
@@ -91,6 +91,31 @@
         pause();
         hasEnded = true;
         resultRecorded = false; // Reset so question can show
+        // Bring overlay to front when timer ends locally
+        const isTauriLocal = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+        if (isTauriLocal) {
+          (async () => {
+            try {
+              const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+              const current = getCurrentWebviewWindow();
+              try {
+                await current.unminimize?.();
+              } catch {}
+              try {
+                await current.setVisibleOnAllWorkspaces(true);
+              } catch {}
+              try {
+                await current.setAlwaysOnTop(true);
+              } catch {}
+              try {
+                await current.show();
+              } catch {}
+              try {
+                await current.setFocus();
+              } catch {}
+            } catch {}
+          })();
+        }
       }
     }, 1000);
     if (!suppressBroadcast) {
@@ -498,6 +523,31 @@
             pause();
             hasEnded = true;
             resultRecorded = false;
+            // Bring overlay to front when timer ends
+            const isTauriEnd = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+            if (isTauriEnd) {
+              (async () => {
+                try {
+                  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                  const current = getCurrentWebviewWindow();
+                  try {
+                    await current.unminimize?.();
+                  } catch {}
+                  try {
+                    await current.setVisibleOnAllWorkspaces(true);
+                  } catch {}
+                  try {
+                    await current.setAlwaysOnTop(true);
+                  } catch {}
+                  try {
+                    await current.show();
+                  } catch {}
+                  try {
+                    await current.setFocus();
+                  } catch {}
+                } catch {}
+              })();
+            }
           } else if (data.type === "result") {
             resultRecorded = true;
             hasEnded = true;
@@ -555,13 +605,16 @@
                     await audioCtx?.resume?.();
                   } catch {}
                   try {
+                    await current.unminimize?.();
+                  } catch {}
+                  try {
+                    await current.setVisibleOnAllWorkspaces(true);
+                  } catch {}
+                  try {
                     await current.setAlwaysOnTop(true);
                   } catch {}
                   try {
                     await current.show();
-                  } catch {}
-                  try {
-                    await current.unminimize?.();
                   } catch {}
                   try {
                     await current.setFocus();
@@ -619,6 +672,31 @@
                   pause();
                   hasEnded = true;
                   resultRecorded = false; // Reset so question can show
+                  // Bring overlay to front when timer ends (from state sync)
+                  const isTauriState = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
+                  if (isTauriState) {
+                    (async () => {
+                      try {
+                        const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                        const current = getCurrentWebviewWindow();
+                        try {
+                          await current.unminimize?.();
+                        } catch {}
+                        try {
+                          await current.setVisibleOnAllWorkspaces(true);
+                        } catch {}
+                        try {
+                          await current.setAlwaysOnTop(true);
+                        } catch {}
+                        try {
+                          await current.show();
+                        } catch {}
+                        try {
+                          await current.setFocus();
+                        } catch {}
+                      } catch {}
+                    })();
+                  }
                 }
               }, 1000);
             } else {

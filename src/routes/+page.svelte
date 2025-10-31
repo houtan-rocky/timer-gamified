@@ -389,7 +389,6 @@
       intervalId = null;
     }
     intervalId = window.setInterval(() => {
-      autoMessageThisTickFired = false;
       if (!startAtMs) return;
       const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
       const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
@@ -933,7 +932,6 @@
     }
   }
 
-  let autoMessageThisTickFired = false;
   // Top-level:
   let lastTickTimestamp = 0;
   // Track messages that have been fired this tick to prevent duplicates within same tick
@@ -1398,13 +1396,13 @@
             intervalId = null;
           }
           intervalId = window.setInterval(() => {
-            autoMessageThisTickFired = false;
             if (!startAtMs) return;
             const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
             const nextRemaining = Math.max(0, runDurationSeconds - elapsed);
             if (nextRemaining !== remainingSeconds) {
               remainingSeconds = nextRemaining;
-              handleTick();
+              // Don't call handleTick here - it's already handled in the main interval
+              // This sync interval is just for keeping state in sync, not for firing messages
               setTaskbarProgress(
                 (runDurationSeconds - remainingSeconds) /
                   Math.max(1, runDurationSeconds)
