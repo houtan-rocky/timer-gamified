@@ -1,6 +1,6 @@
 <script lang="ts">
   // Tauri API will be imported dynamically only when available
-  import Input from "../lib/components/Input.svelte";
+  import Input from "../../lib/components/Input.svelte";
 
   let presets = $state<number[]>([120, 600, 1200]);
   let selectedSeconds = $state(120);
