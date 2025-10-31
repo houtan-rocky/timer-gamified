@@ -506,6 +506,9 @@
       q: encodeURIComponent(endQuestionText),
       alwaysOnTop: overlayAlwaysOnTop ? '1' : '0',
       popupOnEnd: overlayPopupOnEnd ? '1' : '0',
+      overlayMode: overlayMode,
+      progressBarColor: overlayProgressBarColor,
+      progressBarType: overlayProgressBarType,
     });
     if (!isTauri) {
       location.href = `/overlay?${params.toString()}`;
@@ -909,10 +912,13 @@
 
   let overlayAlwaysOnTop = $state(true); // user option for overlay always-on-top
   let overlayPopupOnEnd = $state(false); // user option for popup on timer end
+  let overlayMode = $state("normal"); // "normal" | "progressbar" | ...
+  let overlayProgressBarColor = $state("#8ef59b");
+  let overlayProgressBarType = $state("full");
   function persistOverlaySettings() {
     try {
-      localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd }));
-      if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop});
+      localStorage.setItem('overlaySettings', JSON.stringify({ overlayAlwaysOnTop, overlayPopupOnEnd, overlayMode, overlayProgressBarColor, overlayProgressBarType }));
+      if (bc) bc.postMessage({source:'main', type:'overlay_settings', alwaysOnTop: overlayAlwaysOnTop, overlayMode: overlayMode, progressBarColor: overlayProgressBarColor, progressBarType: overlayProgressBarType});
     } catch {}
   }
   function loadOverlaySettings() {
@@ -922,6 +928,9 @@
         const v = JSON.parse(s);
         if (typeof v.overlayAlwaysOnTop === 'boolean') overlayAlwaysOnTop = v.overlayAlwaysOnTop;
         if (typeof v.overlayPopupOnEnd === 'boolean') overlayPopupOnEnd = v.overlayPopupOnEnd;
+        if (typeof v.overlayMode === 'string') overlayMode = v.overlayMode;
+        if (typeof v.overlayProgressBarColor === 'string') overlayProgressBarColor = v.overlayProgressBarColor;
+        if (typeof v.overlayProgressBarType === 'string') overlayProgressBarType = v.overlayProgressBarType;
       }
     } catch {}
   }
@@ -1189,28 +1198,28 @@
   }
 </script>
 
-<main class="wrap">
-  <h1>Timer</h1>
+<main class="max-w-[640px] mx-auto px-4 py-8 flex flex-col gap-4">
+  <h1 class="text-4xl font-bold">Timer</h1>
 
-  <div class="presets">
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
     {#each presets as p, i}
-      <div class="preset card">
+      <div class="relative p-2 rounded-xl shadow-[0_8px_20px_rgba(0,0,0,0.35)] [background-color:var(--color-card)] border border-[var(--color-card-border)] group theme-light:shadow-[0_8px_32px_rgba(120,120,140,0.13)]">
         <button
-          class="preset-btn bordered {selectedSeconds === p ? 'selected' : ''}"
+          class="w-full p-4 text-left bg-transparent [color:var(--color-foreground)] relative z-[1] rounded-xl border border-[var(--color-card-border)] {selectedSeconds === p ? '![border-color:var(--color-primary)]' : ''}"
           onclick={() => setPreset(p)}
         >
-          <span class="time"
+          <span class="text-lg font-semibold block font-['Play',Inter,ui-sans-serif,system-ui,sans-serif]"
             >{Math.floor(p / 3600)
               ? `${Math.floor(p / 3600)}h `
               : ""}{Math.floor((p % 3600) / 60)}m{p % 60
               ? ` ${p % 60}s`
               : ""}</span
           >
-          <span class="hint muted">click to select</span>
+          <span class="text-xs [color:var(--color-muted)]">click to select</span>
         </button>
-        <div class="actions">
+        <div class="absolute top-2 right-2 inline-flex gap-1.5 opacity-0 pointer-events-none transition-opacity z-[2] group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
           <button
-            class="icon edit"
+            class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:[color:var(--color-foreground)]"
             title="Edit"
             onclick={() => openEdit(i)}
             aria-label="Edit preset"
@@ -1233,7 +1242,7 @@
             </svg>
           </button>
           <button
-            class="icon remove"
+            class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
             title="Remove"
             onclick={() => removePresetAt(i)}
             aria-label="Remove preset">×</button
@@ -1241,9 +1250,9 @@
         </div>
       </div>
     {/each}
-    <div class="preset add card">
+    <div class="relative p-2 rounded-xl shadow-[0_8px_20px_rgba(0,0,0,0.35)] [background-color:var(--color-card)] border border-[var(--color-card-border)] theme-light:shadow-[0_8px_32px_rgba(120,120,140,0.13)]">
       <button
-        class="preset-btn bordered"
+        class="w-full p-4 text-left bg-transparent [color:var(--color-foreground)] rounded-xl border border-[var(--color-card-border)]"
         onclick={() => {
           editHours = 0;
           editMinutes = 5;
@@ -1256,33 +1265,30 @@
     </div>
   </div>
 
-  <div class="display">{formatTime(remainingSeconds)}</div>
+  <div class="text-6xl text-center tracking-wider font-['Play',Inter,ui-sans-serif,system-ui,sans-serif]">{formatTime(remainingSeconds)}</div>
   {#if showEndQuestion && askOnEnd}
-    <div class="end-question">
-      <div class="q">{endQuestionText}</div>
-      <div class="buttons">
-        <button class="yes" onclick={() => answerEnd(true)} title="Yes">✓</button>
-        <button class="no" onclick={() => answerEnd(false)} title="No">✖</button>
+    <div class="flex flex-col items-center gap-2 mt-2">
+      <div class="font-semibold">{endQuestionText}</div>
+      <div class="flex gap-3">
+        <button class="w-9 h-9 rounded-lg border [border-color:var(--color-card-border)] text-white bg-[rgba(0,255,128,0.20)]" onclick={() => answerEnd(true)} title="Yes">✓</button>
+        <button class="w-9 h-9 rounded-lg border [border-color:var(--color-card-border)] text-white bg-[rgba(255,64,64,0.20)]" onclick={() => answerEnd(false)} title="No">✖</button>
       </div>
     </div>
   {/if}
-  <div class="stats">Today: {wins}/{losses}</div>
+  <div class="text-center [color:var(--color-muted)] -mt-2">Today: {wins}/{losses}</div>
 
-  <section class="heatmap-wrap">
+  <section class="mt-3 overflow-x-auto">
     {#key heatmapKey}
-    <div class="heatmap-grid">
-      <!-- Month labels on first row, at visually correct columns -->
+    <div class="grid grid-cols-[20px_repeat(60,8px)] grid-rows-[14px_repeat(7,8px)] gap-[2px] items-center mt-3 min-w-0">
       {#each buildMonthLabels(buildYearWeeks()) as ml}
-        <div class="hm-month" style={`grid-column:${ml.col};`}>{ml.text}</div>
+        <div class="row-start-1 text-[9px] [color:var(--color-muted)]" style={`grid-column:${ml.col};`}>{ml.text}</div>
       {/each}
-      <!-- Weekday labels (just once left, accurately aligned for rows 2..8) -->
       {#each weekDays as w, j}
-        <div class="hm-wlabel" style={`grid-row:${j+2};`}>{w}</div>
+        <div class="col-start-1 text-[9px] [color:var(--color-muted)] justify-self-end" style={`grid-row:${j+2};`}>{w}</div>
       {/each}
-      <!-- Cells as before -->
       {#each buildYearWeeks() as wk, i}
         {#each wk as day, j}
-          <div class={`hm-cell ${day.key === sameDayKey(new Date()) ? 'today' : ''}`} style={`grid-column:${i+2}; grid-row:${j+2}; background:${colorFor(day.wins, day.losses)};`}
+          <div class={`w-2 h-2 rounded-[1px] grid place-items-center ${day.key === sameDayKey(new Date()) ? '[outline:1px_solid_var(--color-primary)] outline-offset-0.5' : ''}`} style={`grid-column:${i+2}; grid-row:${j+2}; background:${colorFor(day.wins, day.losses)};`}
                title={tooltipFor(day.key)}></div>
         {/each}
       {/each}
@@ -1290,44 +1296,49 @@
     {/key}
   </section>
 
-  <div class="controls">
+  <div class="flex gap-3 flex-wrap p-2 rounded-lg">
     {#if !isRunning}
-      <button class="action primary" onclick={start}>▶ Start</button>
+      <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={start}>▶ Start</button>
     {:else}
-      <button class="action secondary" onclick={stop}>Pause</button>
+      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-[#1b1b1b] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={stop}>Pause</button>
     {/if}
     {#if !isFreshStart()}
-      <button class="action ghost" onclick={reset}>Reset</button>
+      <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={reset}>Reset</button>
     {/if}
     <button
-      class="action ghost {overlayOpen ? 'active' : ''}"
+      class="rounded-[10px] border px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer {overlayOpen ? 'overlay-active' : '[border-color:var(--color-card-border)]'}"
       onclick={openOverlayAndStart}
       title="Toggle overlay"
       >{overlayOpen ? "Overlay mode (on)" : "Overlay mode"}</button
     >
     <button
-      class="icon gear {settingsOpen ? 'active' : ''} tooltip"
+      class="bg-black/35 text-white border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-xl leading-none relative group {settingsOpen ? '![border-color:var(--color-primary)]' : ''} theme-light:text-[#1a1a1a]"
       data-tip="Settings"
       onclick={() => {
         requestNotifyPermission();
         editOpen = false;
         settingsOpen = true;
       }}
-      aria-label="Settings">⚙</button>
+      aria-label="Settings">⚙
+      <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Settings</span>
+    </button>
     <button
-      class="icon chat {autoMessagesEnabled ? 'on' : ''} tooltip"
+      class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer text-[10px] leading-none relative group {autoMessagesEnabled ? '![border-color:var(--color-primary)]' : ''}"
       data-tip="Auto-messages"
       onclick={() => {
         autoMessagesEnabled = !autoMessagesEnabled;
         requestNotifyPermission();
       }}
-      aria-label="Auto messages">💬</button>
+      aria-label="Auto messages">💬
+      <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">Auto-messages</span>
+    </button>
     <button
-      class="icon tooltip"
-      data-tip={allMuted ? "Unmute all notifications" : "Mute all notifications"}
+      class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2.5 py-1.5 cursor-pointer relative group"
       aria-label="Toggle mute"
       onclick={() => (allMuted = !allMuted)}
-      >{allMuted ? '🔕' : '🔔'}</button>
+      >{allMuted ? '🔕' : '🔔'}
+      <span class="absolute -top-[30px] left-1/2 -translate-x-1/2 bg-black/80 text-white rounded-md px-2 py-1 text-xs whitespace-nowrap opacity-0 pointer-events-none transition-opacity group-hover:opacity-100">{allMuted ? "Unmute all notifications" : "Mute all notifications"}</span>
+    </button>
   </div>
 
   <Modal
@@ -1336,39 +1347,39 @@
     subtitle="Adjust hours, minutes and seconds"
     onclose={closeEdit}
   >
-    <div class="grid selects">
-      <label class="row">
-        <span class="muted" style="width:90px">Hours</span>
-        <select bind:value={editHours}>
+    <div class="grid gap-3">
+      <label class="flex gap-3 items-center">
+        <span class="[color:var(--color-muted)] w-[90px]">Hours</span>
+        <select bind:value={editHours} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
           {#each Array.from({ length: 13 }, (_, n) => n) as h}
             <option value={h}>{h}</option>
           {/each}
         </select>
       </label>
-      <label class="row">
-        <span class="muted" style="width:90px">Minutes</span>
-        <select bind:value={editMinutes}>
+      <label class="flex gap-3 items-center">
+        <span class="[color:var(--color-muted)] w-[90px]">Minutes</span>
+        <select bind:value={editMinutes} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
           {#each Array.from({ length: 60 }, (_, n) => n) as m}
             <option value={m}>{m}</option>
           {/each}
         </select>
       </label>
-      <label class="row">
-        <span class="muted" style="width:90px">Seconds</span>
-        <select bind:value={editSeconds}>
+      <label class="flex gap-3 items-center">
+        <span class="[color:var(--color-muted)] w-[90px]">Seconds</span>
+        <select bind:value={editSeconds} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
           {#each Array.from({ length: 60 }, (_, n) => n) as s}
             <option value={s}>{s}</option>
           {/each}
         </select>
       </label>
     </div>
-    <div class="row modal-actions" style="justify-content:flex-end; margin-top: 12px; gap:8px;">
+    <div class="flex gap-2 justify-end mt-3">
       {#if editingIndex !== null}
-        <button class="action ghost" onclick={closeEdit}>Cancel</button>
-        <button class="action primary" onclick={saveEdit}>Save</button>
+        <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={closeEdit}>Cancel</button>
+        <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] cursor-pointer" onclick={saveEdit}>Save</button>
       {:else}
-        <button class="action ghost" onclick={closeEdit}>Cancel</button>
-        <button class="action primary" onclick={addFromEdit}>Add</button>
+        <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={closeEdit}>Cancel</button>
+        <button class="rounded-[10px] border border-[#72d480] px-4 py-2.5 font-semibold text-[#05210c] [background-color:var(--color-primary)] cursor-pointer" onclick={addFromEdit}>Add</button>
       {/if}
     </div>
   </Modal>
@@ -1380,38 +1391,38 @@
       subtitle="Configure zones, messages and sounds"
       onclose={() => (settingsOpen = false)}
     >
-      <div class="grid">
-        <label class="row">
-          <span class="muted" style="width:180px">Critical threshold (%)</span>
-          <input type="range" min="0" max="99" bind:value={criticalPercent} onchange={_ => saveAppSettings()} />
+      <div class="grid gap-3">
+        <label class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Critical threshold (%)</span>
+          <input type="range" min="0" max="99" bind:value={criticalPercent} onchange={_ => saveAppSettings()} class="flex-1" />
           <span>{criticalPercent}%</span>
         </label>
-        <label class="row">
-          <span class="muted" style="width:180px">Danger threshold (%)</span>
-          <input type="range" min="0" max="99" bind:value={dangerPercent} onchange={_ => saveAppSettings()} />
+        <label class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Danger threshold (%)</span>
+          <input type="range" min="0" max="99" bind:value={dangerPercent} onchange={_ => saveAppSettings()} class="flex-1" />
           <span>{dangerPercent}%</span>
         </label>
-        <div class="muted" style="font-size:12px">
+        <div class="[color:var(--color-muted)] text-xs">
           Zone logic: Danger ≤ {dangerPercent}%, Critical between {dangerPercent}% and {criticalPercent}%, OK ≥ {criticalPercent}%.
         </div>
 
-        <div style="margin-top:12px; font-weight:600;">Messages (trigger when remaining ≤ %)</div>
+        <div class="mt-3 font-semibold">Messages (trigger when remaining ≤ %)</div>
         {#each userMessages as msg, idx}
-          <div class="row" style="gap:8px; align-items:center;">
+          <div class="flex gap-2 items-center">
             <input
               type="number"
               min="1"
               max="99"
               bind:value={msg.percent}
-              style="width:80px"
+              class="w-20 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2"
             />
             <input
               type="text"
               bind:value={msg.text}
               placeholder="Message to show"
-              style="flex:1"
+              class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2"
             />
-            <select bind:value={msg.sound}>
+            <select bind:value={msg.sound} class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
               <option value="beep">Beep</option>
               <option value="heartbeat">Heartbeat</option>
               <option value="none">None</option>
@@ -1428,268 +1439,103 @@
                   reader.onload = () => { msg.custom = String(reader.result || ""); };
                   reader.readAsDataURL(file);
                 }}
+                class="bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-1"
               />
             {/if}
             <button
-              class="icon remove"
+              class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer hover:text-[#ff6b6b]"
               title="Remove"
               onclick={() => (userMessages = userMessages.filter((_, i) => i !== idx))}>×</button>
           </div>
         {/each}
-        <div class="row">
+        <div class="flex gap-3">
           <button
-            class="icon"
+            class="bg-black/35 [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg px-2 py-1 cursor-pointer"
             onclick={() => (userMessages = [...userMessages, { percent: 30, text: "Keep going!", sound: "beep" }])}
             title="Add message">＋</button>
         </div>
 
-        <div style="margin-top:12px; font-weight:600;">End question</div>
-        <label class="row" style="gap:8px">
+        <div class="mt-3 font-semibold">End question</div>
+        <label class="flex gap-2">
           <input type="checkbox" bind:checked={askOnEnd} onchange={_ => { persistEndQuestionSettings(); saveAppSettings(); }} />
-          <span class="muted">Ask when timer ends</span>
+          <span class="[color:var(--color-muted)]">Ask when timer ends</span>
         </label>
-        <label class="row">
-          <span class="muted" style="width:180px">Question text</span>
-          <input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} style="flex:1" />
+        <label class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Question text</span>
+          <input type="text" bind:value={endQuestionText} onblur={_ => { persistEndQuestionSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2" />
         </label>
 
-        <div style="margin-top:12px; font-weight:600;">Zone colors</div>
-        <div class="row">
-          <span class="muted" style="width:180px">Danger color</span>
+        <div class="mt-3 font-semibold">Zone colors</div>
+        <div class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Danger color</span>
           <input type="color" bind:value={dangerColor} onchange={_ => saveAppSettings()} />
         </div>
-        <div class="row">
-          <span class="muted" style="width:180px">Critical color</span>
+        <div class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Critical color</span>
           <input type="color" bind:value={criticalColor} onchange={_ => saveAppSettings()} />
         </div>
-        <label class="row"><span class="muted" style="width:180px">When to play zone sound</span>
-          <select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }}>
+        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">When to play zone sound</span>
+          <select bind:value={zoneSoundMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
             <option value="none">Never</option>
             <option value="danger">In Danger only</option>
             <option value="critical">In Critical only</option>
             <option value="all">Any phase change</option>
           </select>
         </label>
-        <label class="row"><span class="muted" style="width:180px">Show notification when entering zone</span>
-          <select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }}>
+        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Show notification when entering zone</span>
+          <select bind:value={zoneNotifyMode} onchange={_ => { persistZoneSoundSettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
             <option value="none">Never</option>
             <option value="danger">In Danger only</option>
             <option value="critical">In Critical only</option>
             <option value="all">Any phase change</option>
           </select>
         </label>
-        <label class="row"><input type="checkbox" bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Overlay always stays on top</label>
-        <label class="row"><input type="checkbox" bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Bring overlay to top when timer ends</label>
-        <label class="row"><span class="muted" style="width:180px">Color Theme</span>
-          <select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)}>
+        <label class="flex gap-2"><input type="checkbox" bind:checked={overlayAlwaysOnTop} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Overlay always stays on top</label>
+        <label class="flex gap-2"><input type="checkbox" bind:checked={overlayPopupOnEnd} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} /> Bring overlay to top when timer ends</label>
+        
+        <div class="mt-3 font-semibold">Overlay Mode</div>
+        <label class="flex gap-3 items-center">
+          <span class="[color:var(--color-muted)] w-[180px]">Mode</span>
+          <select bind:value={overlayMode} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+            <option value="normal">Normal</option>
+            <option value="progressbar">Progress Bar</option>
+          </select>
+        </label>
+        {#if overlayMode === "progressbar"}
+          <label class="flex gap-3 items-center">
+            <span class="[color:var(--color-muted)] w-[180px]">Progress bar color</span>
+            <input type="color" bind:value={overlayProgressBarColor} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} />
+          </label>
+          <label class="flex gap-3 items-center">
+            <span class="[color:var(--color-muted)] w-[180px]">Progress bar type</span>
+            <select bind:value={overlayProgressBarType} onchange={_ => { persistOverlaySettings(); saveAppSettings(); }} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
+              <option value="full">Full</option>
+            </select>
+          </label>
+        {/if}
+        <label class="flex gap-3 items-center"><span class="[color:var(--color-muted)] w-[180px]">Color Theme</span>
+          <select bind:value={colorTheme} onchange={_ => setTheme(colorTheme)} class="flex-1 bg-[#0f0f0f] [color:var(--color-foreground)] border [border-color:var(--color-card-border)] rounded-lg p-2">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
         </label>
       </div>
-      <div class="row" style="justify-content:flex-end; margin-top: 12px; gap:8px;">
-        <button class="action ghost" onclick={() => { resetAll(); settingsOpen = false; }} title="Reset all data">Reset all</button>
-        <button class="action" onclick={() => (settingsOpen = false)}>Close</button>
+      <div class="flex justify-end gap-2 mt-3">
+        <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] bg-transparent cursor-pointer" onclick={() => { resetAll(); settingsOpen = false; }} title="Reset all data">Reset all</button>
+        <button class="rounded-[10px] border [border-color:var(--color-card-border)] px-4 py-2.5 font-semibold [color:var(--color-foreground)] [background-color:var(--color-card)] shadow-[0_8px_20px_rgba(0,0,0,0.35)] cursor-pointer" onclick={() => (settingsOpen = false)}>Close</button>
       </div>
     </Modal>
   {/if}
 </main>
 
 <style>
-  .wrap {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 32px 16px;
-  display: flex;
-  flex-direction: column;
-    gap: 16px;
+  button.overlay-active {
+    background-color: rgba(115, 212, 128, 0.15) !important;
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 0 2px rgba(115, 212, 128, 0.35) !important;
   }
-
-  .presets {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 16px;
-  }
-  .preset {
-    position: relative;
-    padding: 8px;
-  }
-  .preset-btn {
-    width: 100%;
-    padding: 16px;
-    text-align: left;
-    background: transparent;
-    color: var(--text);
-    position: relative;
-    z-index: 1;
-  }
-  .preset-btn.selected {
-    border-color: var(--primary);
-  }
-  .preset .actions {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    display: inline-flex;
-    gap: 6px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-    z-index: 2;
-  }
-  .preset:hover .actions,
-  .preset:focus-within .actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .icon {
-    background: rgba(0, 0, 0, 0.35);
-    color: var(--text);
-    border: 1px solid var(--card-border);
-    border-radius: 8px;
-    padding: 4px 8px;
-    cursor: pointer;
-  }
-  .icon.edit:hover {
-    color: var(--text);
-  }
-  .icon.remove:hover {
-    color: #ff6b6b;
-  }
-  .time {
-    font-size: 18px;
-    font-weight: 600;
-  }
-  .hint {
-    font-size: 12px;
-  }
-
-  .display, .time, .overlay .time {
-    font-family: 'Play', 'Inter', ui-sans-serif, system-ui, sans-serif;
-  }
-  .display {
-    font-size: 64px;
-  text-align: center;
-    letter-spacing: 2px;
-  }
-  .stats { text-align: center; color: var(--muted); margin-top: -8px; }
-
-  .controls {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 8px;
-    border-radius: 8px;
-  }
-  .selects select {
-    background: #0f0f0f;
-    color: var(--text);
-    border: 1px solid var(--card-border);
-  border-radius: 8px;
-    padding: 8px;
-  }
-  .icon {
-    background: rgba(0, 0, 0, 0.35);
-    color: var(--text);
-    border: 1px solid var(--card-border);
-    border-radius: 8px;
-    padding: 6px 10px;
-  cursor: pointer;
-}
-  .icon.gear {
-    color: #ffffff;
-  }
-  :global(.theme-light) .icon.gear {
-    color: #1a1a1a;
-  }
-  .icon.chat.on,
-  .icon.gear.active {
-    border-color: var(--primary);
-  }
-  .action {
-    border-radius: 10px;
-    border: 1px solid var(--card-border);
-    padding: 0.6em 1em;
-    font-weight: 600;
-    color: var(--text);
-    background: var(--card);
-    box-shadow: var(--shadow);
-    cursor: pointer;
-  }
-  .action.primary {
-    background: var(--primary);
-    color: #05210c;
-    border-color: #72d480;
-  }
-  .action.secondary {
-    background: #1b1b1b;
-  }
-  .action.ghost {
-    background: transparent;
-  }
-  button.action.ghost.active {
-    background: rgba(115, 212, 128, 0.15);
-    border: 1px solid var(--primary);
-    box-shadow: 0 0 0 2px rgba(115, 212, 128, 0.35);
-  }
-  .icon.gear {
-    font-size: 20px;
-    line-height: 1;
-  }
-  .icon.chat {
-    font-size: 10px;
-    line-height: 1;
-  }
-  .tooltip {
-    position: relative;
-  }
-  .tooltip::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: -30px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.8);
-    color: #fff;
-    border-radius: 6px;
-    padding: 4px 8px;
-    font-size: 12px;
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-  }
-  .tooltip:hover::after {
-    opacity: 1;
-  }
-
-  .end-question { display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:8px; }
-  .end-question .q { font-weight:600; }
-  .end-question .buttons { display:flex; gap:12px; }
-  .end-question .buttons .yes, .end-question .buttons .no { width:36px; height:36px; border-radius:8px; border:1px solid var(--card-border); background:#111; color:#fff; }
-  .end-question .buttons .yes { background: rgba(0,255,128,.20); }
-  .end-question .buttons .no { background: rgba(255,64,64,.20); }
-
-  /* heatmap styles (hard-scoped) */
-  .heatmap-wrap .heatmap-grid {
-    display:grid;
-    grid-template-columns: 24px repeat(60, 12px);
-    grid-template-rows: 16px repeat(7, 12px);
-    gap: 2px;
-    align-items: center;
-    margin-top: 12px;
-  }
-  .heatmap-wrap .hm-month { grid-row:1; font-size: 10px; color: var(--muted); }
-  .heatmap-wrap .hm-wlabel { grid-column:1; font-size: 10px; color: var(--muted); justify-self: end; }
-  .heatmap-wrap .hm-cell {
-    width:12px;
-    height:12px;
-    border-radius:2px;
-    display: grid;
-    place-items: center;
-  }
-  .heatmap-wrap .hm-cell.today { outline: 1px solid var(--primary); outline-offset: 1px; }
-
-  @media (prefers-color-scheme: dark) {
+  :global(.theme-light) button.overlay-active {
+    background-color: rgba(53, 204, 96, 0.15) !important;
+    box-shadow: 0 0 0 2px rgba(53, 204, 96, 0.35) !important;
   }
 </style>

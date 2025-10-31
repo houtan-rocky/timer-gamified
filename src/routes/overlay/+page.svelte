@@ -38,6 +38,9 @@
   let overlayAlwaysOnTop = false;
   let colorTheme = "dark";
   let bringingToFront = false;
+  let overlayMode = $state("normal");
+  let progressBarColor = $state("#8ef59b");
+  let progressBarType = $state("full");
   function updateOverlayTheme(newTheme: string) {
     colorTheme = newTheme;
     document.body.classList.toggle("theme-dark", colorTheme === "dark");
@@ -147,6 +150,13 @@
       0,
       Math.round((remainingSeconds / Math.max(1, initialSeconds)) * 100)
     );
+  }
+  
+  function progressPercent() {
+    if (initialSeconds <= 0) return 0;
+    const elapsed = initialSeconds - remainingSeconds;
+    const percent = (elapsed / initialSeconds) * 100;
+    return Math.max(0, Math.min(100, percent));
   }
 
   function zoneFromPercent(p: number): "OK" | "CRITICAL" | "DANGER" {
@@ -351,8 +361,14 @@
       } catch {}
     }
     const alwaysOnTopParam = url.searchParams.get("alwaysOnTop");
+    const overlayModeParam = url.searchParams.get("overlayMode");
+    const progressBarColorParam = url.searchParams.get("progressBarColor");
+    const progressBarTypeParam = url.searchParams.get("progressBarType");
     overlayAlwaysOnTop =
       alwaysOnTopParam === "1" || alwaysOnTopParam === "true";
+    if (overlayModeParam) overlayMode = overlayModeParam;
+    if (progressBarColorParam) progressBarColor = progressBarColorParam;
+    if (progressBarTypeParam) progressBarType = progressBarTypeParam;
 
     const isTauri =
       typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__;
@@ -490,6 +506,15 @@
                 const current = getCurrentWebviewWindow();
                 await current.setAlwaysOnTop(overlayAlwaysOnTop);
               }
+            }
+            if (typeof data.overlayMode === "string") {
+              overlayMode = data.overlayMode;
+            }
+            if (typeof data.progressBarColor === "string") {
+              progressBarColor = data.progressBarColor;
+            }
+            if (typeof data.progressBarType === "string") {
+              progressBarType = data.progressBarType;
             }
           } else if (data.source === "main" && data.type === "overlay_popup") {
             if (isTauri && !bringingToFront) {
@@ -629,64 +654,48 @@
 </script>
 
 <main
-  class="overlay {zoneFromPercent(
-    currentPercent()
-  ).toLowerCase()} {remainingSeconds === 0 ? 'ended' : ''}"
+  class="relative flex flex-col gap-1.5 items-center justify-center w-full h-full px-2 py-1.5 overflow-hidden [-webkit-app-region:drag] text-center {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()).toLowerCase() === 'ok' ? 'bg-transparent' : zoneFromPercent(currentPercent()).toLowerCase() === 'danger' ? '[background:color-mix(in_srgb,var(--danger)_10%,transparent)]' : zoneFromPercent(currentPercent()).toLowerCase() === 'critical' ? '[background:color-mix(in_srgb,var(--critical)_12%,transparent)]' : '') : 'bg-transparent'} {remainingSeconds === 0 ? 'ended' : ''}"
   data-tauri-drag-region
   style={`--danger:${dangerColor}; --critical:${criticalColor}`}
   onpointerdown={requestOverlayGoNotOnTop}
 >
-  <div class="top">
-    <div class="left">{now.toLocaleDateString()}</div>
-    <div class="right">
-      {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+  {#if overlayMode === "progressbar" && progressBarType === "full"}
+    <div class="absolute left-0 top-0 bottom-0 w-full pointer-events-none [-webkit-app-region:no-drag] z-0">
+      <div class="absolute left-0 top-0 bottom-0 transition-[width] duration-200 ease-linear opacity-80" style={`width: ${progressPercent()}%; background-color: ${progressBarColor};`}></div>
     </div>
+  {/if}
+  <div class="absolute top-1.5 left-2 right-2 z-10 flex justify-between text-xs opacity-90 [-webkit-app-region:no-drag]">
+    <div>{now.toLocaleDateString()}</div>
+    <div>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
   </div>
+  <div class="relative z-10 flex flex-col items-center justify-center flex-1 w-full">
   {#if hasEnded && askOnEnd && !resultRecorded}
-    <div class="question">{endQuestionText}</div>
-    <div class="result-buttons">
+    <div class="text-lg font-semibold [-webkit-app-region:no-drag]">{endQuestionText}</div>
+    <div class="flex gap-2.5 [-webkit-app-region:no-drag] justify-center">
       <button
-        class="yes"
+        class="w-11 h-11 rounded-xl border border-[var(--card-border,#2a2a2a)] bg-black/35 text-white text-[0] grid place-items-center bg-[rgba(0,255,128,0.25)] [-webkit-app-region:no-drag]"
         onclick={() => recordResult(true)}
         title="Yes"
         aria-label="Yes"
       >
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z"
-            fill="currentColor"
-          />
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M20.285 6.707a1 1 0 0 0-1.414-1.414L9.5 14.664l-3.371-3.37a1 1 0 1 0-1.415 1.413l4.078 4.079a1 1 0 0 0 1.415 0l10.078-10.079z" fill="currentColor" />
         </svg>
       </button>
       <button
-        class="no"
+        class="w-11 h-11 rounded-xl border border-[var(--card-border,#2a2a2a)] bg-black/35 text-white text-[0] grid place-items-center bg-[rgba(255,64,64,0.25)] [-webkit-app-region:no-drag]"
         onclick={() => recordResult(false)}
         title="No"
         aria-label="No"
       >
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z"
-            fill="currentColor"
-          />
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7a1 1 0 1 0-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 1 0 1.41 1.42L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z" fill="currentColor" />
         </svg>
       </button>
     </div>
   {:else}
     <div
-      class="time"
+      class="text-4xl tracking-wider font-['Play',Inter,ui-sans-serif,system-ui,sans-serif] text-center w-full px-4 animate-[pulse_2s_ease-in-out_infinite] cursor-pointer {remainingSeconds === 0 ? 'animate-none' : ''} {overlayMode !== 'progressbar' ? (zoneFromPercent(currentPercent()) === 'DANGER' ? '[animation-duration:1.25s] [color:var(--danger)] [text-shadow:0_0_12px_color-mix(in_srgb,var(--danger)_50%,transparent)]' : zoneFromPercent(currentPercent()) === 'CRITICAL' ? '[animation-duration:0.75s] [color:var(--critical)] [text-shadow:0_0_14px_color-mix(in_srgb,var(--critical)_55%,transparent)]' : '') : ''} theme-light:[color:#17191b] theme-light:[text-shadow:none] [-webkit-app-region:no-drag]"
       role="button"
       tabindex="0"
       onclick={openTimeEditor}
@@ -696,10 +705,10 @@
       title="Click to edit time"
     >
       {#if editingTime}
-        <div class="time-edit-wrap">
+        <div class="flex flex-col items-center gap-1">
           <input
             type="text"
-            class="edit-time-text"
+            class="w-[86px] text-center text-base rounded-[7px] border border-[#8884] p-0.5"
             bind:value={editTimeStr}
             bind:this={editInputEl}
             autofocus={true}
@@ -708,10 +717,9 @@
               if (e.key === "Enter") saveTimeEdit();
               else if (e.key === "Escape") cancelTimeEdit();
             }}
-            style="width:86px; text-align:center; font-size:1em; border-radius:7px; border:1px solid #8884; padding:3px;"
           />
           {#if editError}
-            <div class="edit-error">{editError}</div>
+            <div class="text-[11px] text-[#ff5a5a]">{editError}</div>
           {/if}
         </div>
       {:else}
@@ -719,304 +727,17 @@
       {/if}
     </div>
   {/if}
-  <div class="buttons">
+  <div class="flex gap-1.5 [-webkit-app-region:no-drag] justify-center w-full px-4 mt-2">
     {#if !isRunning && !hasEnded}
-      <button onclick={start}>Resume</button>
+      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={start}>Resume</button>
     {:else if !hasEnded}
-      <button onclick={pause}>Pause</button>
+      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={pause}>Pause</button>
     {/if}
     {#if !hasEnded && hasStarted}
-      <button
-        onclick={() => {
-          pause();
-          reset();
-        }}>Stop</button
-      >
+      <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={() => { pause(); reset(); }}>Stop</button>
     {/if}
-    <button
-      onclick={() => {
-        reset();
-        start();
-      }}>Restart</button
-    >
+    <button class="rounded-lg border border-transparent py-1 px-2.5 text-[0.85em] font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] theme-light:text-[#17191b] theme-light:bg-white theme-light:border-[#d3dbe3] theme-light:active:bg-[#e8e8e8]" onclick={() => { reset(); start(); }}>Restart</button>
+  </div>
   </div>
 </main>
 
-<style>
-  :global(html, body) {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
-  :global(body) {
-    overscroll-behavior: contain;
-  }
-  :global(*),
-  :global(*::before),
-  :global(*::after) {
-    box-sizing: border-box;
-  }
-  :global(::-webkit-scrollbar) {
-    width: 0;
-    height: 0;
-  }
-  .overlay {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    padding: 6px 8px;
-    overflow: hidden;
-    -webkit-app-region: drag;
-    text-align: center;
-  }
-
-  /* Add interior padding to main content containers for clean look */
-  .buttons,
-  .time,
-  .bar {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-  .top,
-  .overlay-exit {
-    overflow: visible;
-  }
-
-  .overlay.ok {
-    background: transparent;
-  }
-  .overlay.danger {
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
-  }
-  .overlay.critical {
-    background: color-mix(in srgb, var(--critical) 12%, transparent);
-  }
-
-  .time {
-    font-size: 40px;
-    letter-spacing: 2px;
-    animation: pulse 2s infinite ease-in-out;
-    font-family: "Play", "Inter", ui-sans-serif, system-ui, sans-serif;
-    text-align: center;
-    width: 100%;
-  }
-  .time-edit-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-  .edit-error {
-    font-size: 11px;
-    color: #ff5a5a;
-  }
-  .overlay.ended .time {
-    animation: none;
-  }
-  .overlay.danger .time {
-    animation-duration: 1.25s;
-    color: var(--danger);
-    text-shadow: 0 0 12px color-mix(in srgb, var(--danger) 50%, transparent);
-  }
-  .overlay.critical .time {
-    animation-duration: 0.75s;
-    color: var(--critical);
-    text-shadow: 0 0 14px color-mix(in srgb, var(--critical) 55%, transparent);
-  }
-  @keyframes pulse {
-    0% {
-      transform: scale(1);
-    }
-    50% {
-      transform: scale(1.03);
-    }
-    100% {
-      transform: scale(1);
-    }
-  }
-
-  .bar {
-    width: 90%;
-    height: 8px;
-    background: #242424;
-    border-radius: 6px;
-    overflow: hidden;
-    -webkit-app-region: no-drag;
-  }
-  .bar .fill {
-    height: 100%;
-    background: #8ef59b;
-    transition: width 0.2s ease;
-  }
-
-  .top {
-    position: absolute;
-    top: 6px;
-    left: 8px;
-    right: 8px;
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    opacity: 0.9;
-    -webkit-app-region: no-drag;
-  }
-
-  .buttons {
-    display: flex;
-    gap: 6px;
-    -webkit-app-region: no-drag;
-    justify-content: center;
-    width: 100%;
-  }
-
-  button {
-    border-radius: 8px;
-    border: 1px solid transparent;
-    padding: 0.32em 0.7em;
-    font-size: 0.85em;
-    font-weight: 500;
-    font-family: inherit;
-    color: #0f0f0f;
-    background-color: #ffffff;
-    transition: border-color 0.25s;
-    box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: #396cd8;
-  }
-  button:active {
-    background-color: #e8e8e8;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    button {
-      color: #ffffff;
-      background-color: #0f0f0f98;
-    }
-    button:active {
-      background-color: #0f0f0f69;
-    }
-  }
-  :global(.theme-light) button {
-    color: #17191b;
-    background-color: #ffffff;
-    border: 1px solid #d3dbe3;
-  }
-  :global(.theme-light) button:active {
-    background-color: #e8e8e8;
-  }
-  .overlay-exit {
-    position: absolute;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    vertical-align: center;
-    left: 6px;
-    top: 50%;
-    transform: translateY(-50%);
-    opacity: 0.08;
-    transition: opacity 0.15s ease;
-    -webkit-app-region: no-drag;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid var(--card-border, #2a2a2a);
-    border-radius: 12px;
-    width: 20px;
-    height: 20px;
-    display: grid;
-    place-items: center;
-    color: #fff;
-    padding: 0;
-    margin: 0;
-  }
-  .overlay:hover .overlay-exit {
-    opacity: 0.8;
-  }
-  .question {
-    font-size: 18px;
-    font-weight: 600;
-    -webkit-app-region: no-drag;
-  }
-  .result-buttons {
-    display: flex;
-    gap: 10px;
-    -webkit-app-region: no-drag;
-    justify-content: center;
-  }
-  .result-buttons .yes,
-  .result-buttons .no {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    border: 1px solid var(--card-border, #2a2a2a);
-    background: rgba(0, 0, 0, 0.35);
-    color: #fff;
-    font-size: 0;
-    display: grid;
-    place-items: center;
-  }
-  .result-buttons .yes {
-    background: rgba(0, 255, 128, 0.25);
-  }
-  .result-buttons .no {
-    background: rgba(255, 64, 64, 0.25);
-  }
-  .drag-handle {
-    width: 100%;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: grab;
-    user-select: none;
-    background: linear-gradient(180deg, #3336 65%, transparent 100%);
-    -webkit-app-region: drag;
-    position: relative;
-    z-index: 2;
-    margin-bottom: 2px;
-  }
-  .drag-icon {
-    font-size: 22px;
-    color: #b8b8b8aa;
-    opacity: 0.68;
-    letter-spacing: 4px;
-    pointer-events: none;
-  }
-  .edit-time-ui input {
-    font-size: 1em;
-    text-align: center;
-    margin: 0 3px;
-    padding: 2px 4px;
-    border-radius: 5px;
-    border: 1px solid #8884;
-  }
-  .edit-time-ui button {
-    margin-left: 4px;
-    font-size: 1em;
-    background: #272727;
-    color: #eee;
-    border: 1px solid #444d;
-    border-radius: 5px;
-    cursor: pointer;
-    padding: 2px 8px;
-  }
-  .edit-time-ui button:hover {
-    background: #467;
-    color: #fff;
-  }
-  .time[title] {
-    cursor: pointer;
-  }
-  .theme-light .overlay.ok .time {
-    color: #17191b !important;
-    text-shadow: none !important;
-  }
-</style>

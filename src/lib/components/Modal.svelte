@@ -22,45 +22,10 @@
 </script>
 
 {#if open}
-  <div class="modal-backdrop" on:click={handleBackdrop}>
-    <div class="modal-content">
+  <div class="backdrop fixed inset-0 z-[10000] bg-black/33 flex items-center justify-center" on:click={handleBackdrop}>
+    <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(560px,92vw)] max-h-[92vh] overflow-auto z-[1010] [background-color:var(--color-card)] rounded-xl px-5 py-6 shadow-[0_8px_48px_rgba(0,0,0,0.67)]">
       <slot />
     </div>
   </div>
 {/if}
-
-<style>
-.modal-backdrop {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 10000;
-  background: rgba(0,0,0,0.33);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.sheet {
-  padding: 16px;
-}
-.modal-content {
-  position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(560px, 92vw);
-  max-height: 92vh;
-  overflow: auto;
-  z-index: 1010;
-  background: var(--modal-bg, #222d);
-  border-radius: 12px;
-  padding: 24px 20px 18px 20px;
-  box-shadow: 0 8px 48px #000a;
-}
-.head { display: flex; align-items: center; justify-content: space-between; }
-.titles h2 { margin: 0 0 4px 0; }
-.titles p { margin: 0; }
-.close { background: transparent; border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 4px 10px; cursor: pointer; }
-/* .body { margin-top: 12px; } */
-</style>
 

@@ -1,0 +1,4 @@
+use tailwindcss with classvariant for styling
+---
+alwaysApply: true
+---

@@ -120,94 +120,39 @@
   }
 </script>
 
-<main class="wrap">
-  <h1>Timer</h1>
+<main class="max-w-[520px] mx-auto px-4 py-8 flex flex-col gap-4">
+  <h1 class="text-4xl font-bold">Timer</h1>
 
-  <div class="presets">
+  <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-2">
     {#each presets as p}
-      <div class="preset-item">
-        <button class:selected={selectedSeconds === p} onclick={() => setPreset(p)}>
+      <div class="flex gap-1.5 items-center">
+        <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] {selectedSeconds === p ? 'border-[#396cd8]' : ''}" onclick={() => setPreset(p)}>
           {minutes(p)} min
         </button>
-        <div class="edit">
-          <input type="number" min="1" value={minutes(p)} oninput={(e) => updatePreset(p, Number(e.currentTarget.value))} />
-          <button class="remove" title="Remove" onclick={() => removePreset(p)}>×</button>
+        <div class="flex gap-1.5 items-center">
+          <input type="number" min="1" value={minutes(p)} oninput={(e) => updatePreset(p, Number(e.currentTarget.value))} class="w-16 rounded-lg border [border-color:var(--color-card-border)] px-2 py-1" />
+          <button class="rounded-lg border border-transparent py-1.5 px-3 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" title="Remove" onclick={() => removePreset(p)}>×</button>
         </div>
       </div>
     {/each}
   </div>
 
-  <div class="add">
-    <input type="number" min="1" bind:value={newPresetMinutes} />
-    <button onclick={addPreset}>Add preset (min)</button>
+  <div class="flex gap-2 items-center">
+    <input type="number" min="1" bind:value={newPresetMinutes} class="w-20 rounded-lg border [border-color:var(--color-card-border)] px-2 py-1" />
+    <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" onclick={addPreset}>Add preset (min)</button>
   </div>
 
-  <div class="display">{formatTime(remainingSeconds)}</div>
+  <div class="text-6xl text-center tracking-wider font-['Play',Inter,ui-sans-serif,system-ui,sans-serif]">{formatTime(remainingSeconds)}</div>
 
-  <div class="controls">
+  <div class="flex gap-2 flex-wrap p-2">
     {#if !isRunning}
-      <button onclick={start}>Start</button>
+      <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" onclick={start}>Start</button>
     {:else}
-      <button onclick={stop}>Pause</button>
+      <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" onclick={stop}>Pause</button>
     {/if}
-    <button onclick={reset}>Reset</button>
-    <button class="view" onclick={openOverlayAndStart}>View mode</button>
+    <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69]" onclick={reset}>Reset</button>
+    <button class="rounded-lg border border-transparent py-2.5 px-5 text-base font-medium font-inherit transition-[border-color] duration-250 shadow-[0_2px_2px_rgba(0,0,0,0.2)] cursor-pointer text-[#0f0f0f] bg-white hover:border-[#396cd8] active:bg-[#e8e8e8] dark:text-white dark:bg-[#0f0f0f98] dark:active:bg-[#0f0f0f69] ml-auto" onclick={openOverlayAndStart}>View mode</button>
   </div>
 </main>
-
-<style>
-.wrap {
-  max-width: 520px;
-  margin: 0 auto;
-  padding: 32px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 12px; }
-.preset-item { display: flex; gap: 6px; align-items: center; }
-.preset-item .edit { display: flex; gap: 6px; align-items: center; }
-.preset-item .edit input { width: 64px; }
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-  cursor: pointer;
-}
-
-button:hover { border-color: #396cd8; }
-button:active { background-color: #e8e8e8; }
-
-button.selected {
-  border-color: #396cd8;
-}
-
-.display {
-  font-size: 64px;
-  text-align: center;
-  letter-spacing: 2px;
-}
-
-.controls { display: flex;
-  padding: 8px;
-   gap: 8px; flex-wrap: wrap; }
-.controls .view { margin-left: auto; }
-.add { display: flex; gap: 8px; align-items: center; }
-.remove { padding: 0.4em 0.8em; }
-
-@media (prefers-color-scheme: dark) {
-  button { color: #ffffff; background-color: #0f0f0f98; }
-  button:active { background-color: #0f0f0f69; }
-}
-</style>
 
 

@@ -5,6 +5,20 @@
   export let type: 'button' | 'submit' = 'button';
   export let disabled: boolean = false;
   export let onclick: ((e: MouseEvent) => void) | undefined = undefined;
+  
+  const baseClasses = "rounded-[10px] border font-semibold cursor-pointer inline-flex gap-2 items-center justify-center transition-all active:translate-y-px";
+  
+  const variantClasses = {
+    primary: "[background-color:var(--color-primary)] text-[#05210c] border-[#72d480] hover:brightness-[0.98]",
+    secondary: "bg-[#1b1b1b] [color:var(--color-foreground)] [border-color:var(--color-card-border)]",
+    ghost: "bg-transparent [color:var(--color-foreground)] border-[#2a2a2a]"
+  };
+  
+  const sizeClasses = {
+    sm: "px-3 py-1.5 text-sm",
+    md: "px-4 py-2.5 text-base",
+    lg: "px-5 py-3 text-lg"
+  };
 </script>
 
 <button
@@ -12,41 +26,8 @@
   {type}
   {disabled}
   onclick={onclick}
-  class={`btn ${variant} ${size}`}
+  class="{baseClasses} {variantClasses[variant]} {sizeClasses[size]}"
 >
   <slot />
-  <style>
-  .btn {
-    border-radius: 10px;
-    border: 1px solid transparent;
-    padding: 0.6em 1.0em;
-    font-size: 1em;
-    font-weight: 600;
-    color: var(--text);
-    background: var(--card);
-    border-color: var(--card-border);
-    box-shadow: var(--shadow);
-    cursor: pointer;
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: center;
-  }
-  .btn:hover { border-color: #3a3a3a; }
-  .btn:active { transform: translateY(1px); }
-
-  .primary {
-    background: var(--primary);
-    color: #05210c;
-    border-color: #72d480;
-  }
-  .primary:hover { filter: brightness(0.98); }
-
-  .secondary { background: #1b1b1b; }
-  .ghost { background: transparent; border-color: #2a2a2a; }
-
-  .sm { padding: 0.4em 0.8em; font-size: 0.9em; }
-  .lg { padding: 0.8em 1.2em; font-size: 1.1em; }
-  </style>
 </button>
 
