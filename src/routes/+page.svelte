@@ -373,7 +373,7 @@
         snd: dangerSound,
         csnd: criticalSound,
         colors: { dangerColor, criticalColor },
-        messages: userMessages.map(({ percent, text }) => ({ percent, text })),
+        messages: userMessages.map(({ percent, text, fired, sound, custom }) => ({ percent, text, fired, sound, custom })),
       });
   }
 
@@ -798,7 +798,19 @@
         // Cooldown: do not fire if fired in last 2s
         if (messageFireTimestamps[i] && now - messageFireTimestamps[i] < 2000) continue;
         messageFireTimestamps[i] = now;
-        m.fired = true; // Set fired immediately
+        // Set fired immediately BEFORE firing to prevent race conditions
+        m.fired = true;
+        // Sync fired state to other windows to prevent duplicates
+        if (bc && !suppressBroadcast) {
+          try {
+            bc.postMessage({
+              source: "main",
+              type: "message_fired",
+              messageIndex: i,
+              timestamp: now
+            });
+          } catch {}
+        }
         notifyDesktop("Timer message", m.text);
         playMessageSound(m.sound, m.custom);
       }

@@ -81,15 +81,8 @@
             else stopDangerSound();
           }
         }
-        for (const m of userMessages) {
-          if (!m.fired && p <= m.percent) {
-            m.fired = true;
-            if (notifyEnabled) {
-              notifyDesktop("Timer message", m.text);
-              playMessageSound(m.sound, m.custom);
-            }
-          }
-        }
+        // Auto-messages are handled by the main window to prevent duplicates
+        // Only process zone changes here
       } else {
         stopDangerSound();
         pause();
@@ -468,7 +461,9 @@
               dangerColor = data.colors.dangerColor ?? dangerColor;
               criticalColor = data.colors.criticalColor ?? criticalColor;
             }
-            if (Array.isArray(data.messages)) userMessages = data.messages;
+            if (Array.isArray(data.messages)) {
+              userMessages = data.messages.map((msg: any) => ({ ...msg, fired: msg.fired || false }));
+            }
             start();
             suppressBroadcast = false;
           } else if (data.type === "pause") {
@@ -493,6 +488,11 @@
           } else if (data.type === "preset") {
             initialSeconds = data.duration ?? initialSeconds;
             remainingSeconds = initialSeconds;
+          } else if (data.type === "message_fired" && typeof data.messageIndex === "number") {
+            // Mark message as fired when main window fires it
+            if (userMessages[data.messageIndex]) {
+              userMessages[data.messageIndex].fired = true;
+            }
           } else if (
             data.source === "main" &&
             data.type === "overlay_settings"
