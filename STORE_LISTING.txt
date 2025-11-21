@@ -1,0 +1,77 @@
+DESCRIPTION
+
+Timer Gamified is a powerful, feature-rich productivity timer application that transforms your work sessions into an engaging, gamified experience. Built with a focus on motivation and accountability, this desktop app helps you stay focused, track your progress, and celebrate your achievements.
+
+Whether you're using the Pomodoro Technique, time-blocking your day, or simply need a reliable timer for focused work sessions, Timer Gamified provides all the tools you need. The app features customizable timer presets, visual and audio feedback, progress tracking, and a unique win/loss system that gamifies your productivity.
+
+Key highlights include an always-on-top overlay window for constant visibility, customizable zone-based alerts (OK, Critical, Danger), automatic progress tracking with beautiful heatmap visualizations, and celebration effects when you complete your sessions. All data is stored locally on your device, ensuring complete privacy and offline functionality.
+
+Perfect for students, professionals, freelancers, and anyone looking to improve their time management and productivity through gamification.
+
+---
+
+WHAT'S NEW IN THIS VERSION
+
+Version 0.1.0 - Initial Release
+
+We're excited to introduce Timer Gamified to the Microsoft Store! This initial release includes:
+
+• Complete timer functionality with customizable presets
+• Gamification system with win/loss tracking and statistics
+• Always-on-top overlay window for constant timer visibility
+• Zone-based visual and audio feedback (OK, Critical, Danger zones)
+• Customizable celebration effects with confetti and sounds
+• Activity heatmap visualization showing your productivity over time
+• Custom sound and image upload support
+• Desktop notifications and system integration
+• Dark theme with customizable colors
+• Full offline functionality - all data stored locally
+• License system for app activation
+• Comprehensive settings and customization options
+
+This is the first public release of Timer Gamified, bringing together productivity tools and gamification in a beautiful, privacy-focused desktop application.
+
+---
+
+PRODUCT FEATURES
+
+1. Customizable Timer Presets - Create and manage multiple timer presets with different durations for various tasks
+
+2. Gamification System - Track wins and losses for each timer session, turning productivity into a game
+
+3. Always-On-Top Overlay Window - Keep the timer visible at all times with a compact, floating overlay window
+
+4. Zone-Based Feedback - Visual and audio alerts for OK, Critical, and Danger zones based on remaining time percentage
+
+5. Customizable Celebration Effects - Confetti animations and custom sounds when you successfully complete a timer session
+
+6. Activity Heatmap - Beautiful year-view heatmap showing your daily productivity patterns and win/loss history
+
+7. Custom Sound Uploads - Upload and use your own sound files for timer alerts, celebrations, and zone notifications
+
+8. Custom Image Uploads - Personalize your overlay window with custom background images
+
+9. Desktop Notifications - System notifications for zone changes and timer completion
+
+10. Progress Bar Integration - Visual progress indicator in the Windows taskbar showing timer completion status
+
+11. Auto-Messages - Set up custom messages that appear at specific time percentages during your timer
+
+12. Multiple Sound Options - Choose from built-in sounds (beep, heartbeat, battle win, epic success) or use custom sounds
+
+13. End-of-Timer Questions - Optional "Win?" prompt to track whether you successfully completed your focused session
+
+14. Statistics Tracking - Daily win/loss counts and historical activity data
+
+15. Dark Theme - Beautiful dark interface with customizable accent colors
+
+16. Timer Synchronization - Main window and overlay window stay perfectly synchronized
+
+17. Customizable Zone Thresholds - Adjust Critical and Danger zone percentages to match your preferences
+
+18. Mute Controls - Global mute toggle and per-zone sound controls
+
+19. License System - Secure local license key storage for app activation
+
+20. Privacy-First Design - All data stored locally, no internet connection required, no data collection
+

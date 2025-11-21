@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "generate-logos": "node generate-logos.js"
   },
   "license": "MIT",
   "dependencies": {
@@ -19,6 +20,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "class-variance-authority": "^0.7.1",
     "normalize.css": "^8.0.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.1.16"
   },
   "devDependencies": {

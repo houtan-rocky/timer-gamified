@@ -1,0 +1,58 @@
+<svg width="720" height="1080" viewBox="0 0 720 1080" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="720" height="1080" fill="#0f0f0f" rx="40"/>
+  
+  <!-- Outer ring (timer circle) -->
+  <circle cx="360" cy="400" r="280" fill="none" stroke="#396cd8" stroke-width="16" opacity="0.3"/>
+  
+  <!-- Progress ring (timer indicator) -->
+  <circle cx="360" cy="400" r="280" fill="none" stroke="#396cd8" stroke-width="20" 
+          stroke-dasharray="1759" stroke-dashoffset="440" 
+          transform="rotate(-90 360 400)" stroke-linecap="round"/>
+  
+  <!-- Inner circle -->
+  <circle cx="360" cy="400" r="220" fill="#1a1a1a" stroke="#396cd8" stroke-width="6"/>
+  
+  <!-- Timer hands/indicator -->
+  <line x1="360" y1="400" x2="360" y2="180" stroke="#396cd8" stroke-width="12" stroke-linecap="round"/>
+  <line x1="360" y1="400" x2="500" y2="400" stroke="#ffa500" stroke-width="10" stroke-linecap="round"/>
+  
+  <!-- Center dot -->
+  <circle cx="360" cy="400" r="16" fill="#396cd8"/>
+  
+  <!-- Gamification elements - stars -->
+  <g transform="translate(360, 100)">
+    <path d="M 0,-12 L 3,-3 L 12,-3 L 5,2 L 7,10 L 0,6 L -7,10 L -5,2 L -12,-3 L -3,-3 Z" 
+          fill="#ffa500" opacity="0.9"/>
+  </g>
+  
+  <g transform="translate(140, 220) rotate(20)">
+    <path d="M 0,-10 L 3,-2 L 10,-2 L 4,2 L 6,8 L 0,5 L -6,8 L -4,2 L -10,-2 L -3,-2 Z" 
+          fill="#ffa500" opacity="0.7"/>
+  </g>
+  
+  <g transform="translate(580, 220) rotate(-20)">
+    <path d="M 0,-10 L 3,-2 L 10,-2 L 4,2 L 6,8 L 0,5 L -6,8 L -4,2 L -10,-2 L -3,-2 Z" 
+          fill="#ffa500" opacity="0.7"/>
+  </g>
+  
+  <!-- Checkmark badge (win indicator) -->
+  <g transform="translate(360, 580)">
+    <circle r="50" fill="#396cd8" opacity="0.2"/>
+    <path d="M -20,0 L -4,16 L 20,-16" stroke="#396cd8" stroke-width="10" 
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  
+  <!-- App name text -->
+  <text x="360" y="750" font-family="Arial, sans-serif" font-size="56" font-weight="bold" 
+        fill="#ffffff" text-anchor="middle" opacity="0.9">TIMER</text>
+  <text x="360" y="810" font-family="Arial, sans-serif" font-size="38" 
+        fill="#396cd8" text-anchor="middle" opacity="0.8">GAMIFIED</text>
+  
+  <!-- Tagline or feature text -->
+  <text x="360" y="900" font-family="Arial, sans-serif" font-size="28" 
+        fill="#888888" text-anchor="middle" opacity="0.7">Productive Timer</text>
+  <text x="360" y="940" font-family="Arial, sans-serif" font-size="28" 
+        fill="#888888" text-anchor="middle" opacity="0.7">with Gamification</text>
+</svg>
+

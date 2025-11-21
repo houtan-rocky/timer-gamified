@@ -1,0 +1,45 @@
+INSTALLER PARAMETERS FOR TIMER GAMIFIED
+
+For Microsoft Store Distribution (MSIX Package):
+
+Microsoft Store apps are distributed as MSIX packages and are installed automatically by the Microsoft Store. No silent installation parameters are required for standard Store installations.
+
+However, for enterprise deployment or manual MSIX installation, you can use:
+
+PowerShell Command:
+Add-AppxPackage -Path "TimerGamified.msix"
+
+For silent/automated installation:
+Add-AppxPackage -Path "TimerGamified.msix" -ForceApplicationShutdown
+
+Note: MSIX packages installed through the Microsoft Store do not require any installation parameters as the Store handles the installation process automatically.
+
+---
+
+If providing a standalone installer (outside Microsoft Store):
+
+For MSI Installer (if applicable):
+/S - Silent installation
+/qn - Quiet mode, no UI
+/qb - Quiet mode, basic progress UI
+/qb! - Quiet mode, no cancel button
+
+Example:
+msiexec /i "TimerGamified.msi" /S /qn
+
+For NSIS Installer (if applicable):
+/S - Silent installation
+/D= - Installation directory
+
+Example:
+TimerGamified.exe /S /D=C:\Program Files\TimerGamified
+
+---
+
+RECOMMENDED ANSWER FOR MICROSOFT STORE:
+
+For Microsoft Store distribution, no installer parameters are required. The app is distributed as an MSIX package and installed automatically by the Microsoft Store. Installation is handled seamlessly through the Store's installation system.
+
+If you need to leave this field empty or provide a note:
+"Not applicable - Microsoft Store handles installation automatically via MSIX package distribution."
+

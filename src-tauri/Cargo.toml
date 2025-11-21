@@ -1,8 +1,8 @@
 [package]
 name = "timer-gamified"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Timer Gamified - A powerful productivity timer with gamification"
+authors = ["Your Name <houtan.rocky@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

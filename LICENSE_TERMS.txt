@@ -1,0 +1,71 @@
+END USER LICENSE AGREEMENT FOR TIMER GAMIFIED
+
+IMPORTANT - READ CAREFULLY: This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity) and the developer of Timer Gamified ("Software") for the software product identified above, which includes computer software and may include associated media, printed materials, and "online" or electronic documentation ("Software").
+
+By installing, copying, or otherwise using the Software, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not install or use the Software.
+
+1. GRANT OF LICENSE
+
+Subject to the terms and conditions of this EULA, you are granted a limited, non-exclusive, non-transferable license to install and use the Software on your personal computer or device for your personal, non-commercial use.
+
+2. RESTRICTIONS
+
+You may NOT:
+- Copy, modify, adapt, alter, translate, or create derivative works of the Software
+- Reverse engineer, decompile, disassemble, or otherwise attempt to derive the source code of the Software
+- Remove, alter, or obscure any proprietary notices, labels, or marks on the Software
+- Rent, lease, lend, sell, sublicense, assign, distribute, publish, transfer, or otherwise make available the Software or any portion thereof to any third party
+- Use the Software for any illegal purpose or in any manner inconsistent with this EULA
+- Use the Software in any way that could damage, disable, overburden, or impair any server, or the network(s) connected to any server
+
+3. LICENSE ACTIVATION
+
+The Software may require activation with a valid license key. You are responsible for maintaining the confidentiality of your license key. You may not share, distribute, or transfer your license key to any third party.
+
+4. INTELLECTUAL PROPERTY RIGHTS
+
+The Software is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties. The Software is licensed, not sold. All title and copyrights in and to the Software (including but not limited to any images, photographs, animations, video, audio, music, text, and "applets" incorporated into the Software), the accompanying printed materials, and any copies of the Software are owned by the developer or its suppliers.
+
+5. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+6. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE DEVELOPER OR ITS SUPPLIERS BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE, EVEN IF THE DEVELOPER HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+7. TERMINATION
+
+This EULA is effective until terminated. Your rights under this EULA will terminate automatically without notice if you fail to comply with any of its terms. Upon termination of the license, you shall cease all use of the Software and destroy all copies, full or partial, of the Software.
+
+8. DATA AND PRIVACY
+
+The Software stores all data locally on your device. No data is transmitted to external servers or third parties. Please refer to the Privacy Policy for detailed information about data handling.
+
+9. UPDATES
+
+The developer may provide updates, upgrades, or modifications to the Software. This EULA will govern any such updates unless they are accompanied by a separate license agreement, in which case the terms of that license agreement will govern.
+
+10. EXPORT RESTRICTIONS
+
+You agree that you will not export or re-export the Software to any country, person, entity, or end user subject to U.S. export restrictions.
+
+11. GOVERNING LAW
+
+This EULA shall be governed by and construed in accordance with the laws of Emirates, without regard to its conflict of law provisions.
+
+12. ENTIRE AGREEMENT
+
+This EULA constitutes the entire agreement between you and the developer relating to the Software and supersedes all prior or contemporaneous oral or written communications, proposals, and representations with respect to the Software or any other subject matter covered by this EULA.
+
+13. SEVERABILITY
+
+If any provision of this EULA is held to be unenforceable, such provision shall be reformed only to the extent necessary to make it enforceable, and such decision shall not affect the enforceability of such provision under other circumstances, or of the remaining provisions hereof under all circumstances.
+
+14. CONTACT INFORMATION
+
+If you have any questions about this EULA, please contact:
+Email: houtan.rocky@gmail.com
+
+By installing or using the Software, you acknowledge that you have read this EULA, understand it, and agree to be bound by its terms and conditions.
+

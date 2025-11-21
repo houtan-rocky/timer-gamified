@@ -1,0 +1,52 @@
+<svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1080" height="1080" fill="#0f0f0f" rx="80"/>
+  
+  <!-- Outer ring (timer circle) -->
+  <circle cx="540" cy="540" r="400" fill="none" stroke="#396cd8" stroke-width="20" opacity="0.3"/>
+  
+  <!-- Progress ring (timer indicator) -->
+  <circle cx="540" cy="540" r="400" fill="none" stroke="#396cd8" stroke-width="24" 
+          stroke-dasharray="2513" stroke-dashoffset="628" 
+          transform="rotate(-90 540 540)" stroke-linecap="round"/>
+  
+  <!-- Inner circle -->
+  <circle cx="540" cy="540" r="320" fill="#1a1a1a" stroke="#396cd8" stroke-width="8"/>
+  
+  <!-- Timer hands/indicator -->
+  <line x1="540" y1="540" x2="540" y2="240" stroke="#396cd8" stroke-width="16" stroke-linecap="round"/>
+  <line x1="540" y1="540" x2="700" y2="540" stroke="#ffa500" stroke-width="12" stroke-linecap="round"/>
+  
+  <!-- Center dot -->
+  <circle cx="540" cy="540" r="20" fill="#396cd8"/>
+  
+  <!-- Gamification elements - stars -->
+  <g transform="translate(540, 140)">
+    <path d="M 0,-15 L 4,-4 L 15,-4 L 6,2 L 9,13 L 0,7 L -9,13 L -6,2 L -15,-4 L -4,-4 Z" 
+          fill="#ffa500" opacity="0.9"/>
+  </g>
+  
+  <g transform="translate(200, 300) rotate(20)">
+    <path d="M 0,-12 L 3,-3 L 12,-3 L 5,2 L 7,10 L 0,6 L -7,10 L -5,2 L -12,-3 L -3,-3 Z" 
+          fill="#ffa500" opacity="0.7"/>
+  </g>
+  
+  <g transform="translate(880, 300) rotate(-20)">
+    <path d="M 0,-12 L 3,-3 L 12,-3 L 5,2 L 7,10 L 0,6 L -7,10 L -5,2 L -12,-3 L -3,-3 Z" 
+          fill="#ffa500" opacity="0.7"/>
+  </g>
+  
+  <!-- Checkmark badge (win indicator) -->
+  <g transform="translate(540, 780)">
+    <circle r="60" fill="#396cd8" opacity="0.2"/>
+    <path d="M -25,0 L -5,20 L 25,-20" stroke="#396cd8" stroke-width="12" 
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  
+  <!-- App name text (optional, can be removed if text is added separately) -->
+  <text x="540" y="950" font-family="Arial, sans-serif" font-size="72" font-weight="bold" 
+        fill="#ffffff" text-anchor="middle" opacity="0.9">TIMER</text>
+  <text x="540" y="1020" font-family="Arial, sans-serif" font-size="48" 
+        fill="#396cd8" text-anchor="middle" opacity="0.8">GAMIFIED</text>
+</svg>
+
